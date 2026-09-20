@@ -4,14 +4,13 @@ A responsive one-page website for Mulatiwa Foundation, a Zambian NGO focused on 
 
 ## Preview locally
 
-Open `dist/index.html` directly in a browser, or serve the `dist` directory with any static web server.
+Open `index.html` directly in a browser, or serve the project root with any static web server.
 
 ## Project structure
 
-- `dist/index.html` — page content and structure
-- `dist/styles.css` — responsive visual design
-- `dist/script.js` — mobile navigation and scroll reveals
-- `dist/assets/` — compressed, web-ready imagery
+- `index.html` — page content and structure
+- `styles.css` — responsive visual design
+- `script.js` — mobile navigation and scroll reveals
 
 ## Content sources
 
