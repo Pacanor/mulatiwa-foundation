@@ -565,12 +565,12 @@ h2 {
 }
 
 .focus-card h3 {
-  max-width: 380px;
   margin: 18px 0 12px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(1.85rem, 2.8vw, 2.45rem);
+  font-size: clamp(1.45rem, 1.55vw + 0.7rem, 1.95rem);
   font-weight: 400;
-  line-height: 1.08;
+  line-height: 1.15;
+  white-space: nowrap;
 }
 
 .focus-card > p {
@@ -1137,6 +1137,10 @@ h2 {
 
   .focus-card {
     padding: 24px;
+  }
+
+  .focus-card h3 {
+    white-space: normal;
   }
 
   .academy-media {
