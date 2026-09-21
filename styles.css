@@ -1,14 +1,15 @@
 :root {
-  --navy: #0b2545;
-  --navy-deep: #06182e;
-  --blue: #164f73;
-  --gold: #f3b61f;
-  --cream: #f7f2e8;
+  --navy: #123a6d;
+  --navy-deep: #0c2a52;
+  --blue: #1b5ea8;
+  --gold: #e8c23a;
+  --cream: #f6f3ea;
   --paper: #fffdf8;
-  --coral: #de6b48;
+  --coral: #1f8a8c;
+  --teal: #1f8a8c;
   --ink: #17212b;
   --muted: #66727e;
-  --line: rgba(11, 37, 69, 0.14);
+  --line: rgba(18, 58, 109, 0.14);
   --container: min(1180px, calc(100% - 48px));
   --radius: 28px;
 }
@@ -110,7 +111,7 @@ a {
   width: var(--container);
   margin-inline: auto;
   display: flex;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 24px;
 }
@@ -118,23 +119,17 @@ a {
 .brand {
   display: inline-flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   color: white;
 }
 
 .brand-mark {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  aspect-ratio: 1;
-  margin-top: 6px;
-  color: var(--navy);
-  background: var(--gold);
-  border-radius: 12px 4px 12px 4px;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 0.82rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
+  display: block;
+  width: 52px;
+  height: 52px;
+  flex-shrink: 0;
+  object-fit: contain;
+  mix-blend-mode: screen;
 }
 
 .brand-copy {
@@ -145,15 +140,21 @@ a {
 }
 
 .brand-copy strong {
-  font-size: 0.92rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  color: white;
+}
+
+.brand-on-light .brand-copy strong {
+  color: var(--blue);
 }
 
 .brand-copy small {
   margin-top: 5px;
   color: var(--gold);
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.24em;
+  letter-spacing: 0.22em;
 }
 
 .site-nav {
@@ -218,7 +219,7 @@ a {
   overflow: hidden;
   color: white;
   background:
-    linear-gradient(130deg, rgba(9, 34, 64, 0.98), rgba(11, 37, 69, 0.95) 58%, #123f5c),
+    linear-gradient(130deg, rgba(12, 42, 82, 0.98), rgba(18, 58, 109, 0.95) 58%, #1b5ea8),
     var(--navy);
 }
 
@@ -429,24 +430,24 @@ h2 {
 
 .hero-stamp {
   position: absolute;
-  top: 18%;
+  top: 16%;
   left: -72px;
   display: grid;
   place-items: center;
-  width: 126px;
+  width: 138px;
   aspect-ratio: 1;
-  padding: 18px;
+  padding: 16px;
   color: var(--navy);
   background: var(--gold);
-  border: 9px solid var(--navy);
+  border: 8px solid var(--navy);
   outline: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
   transform: rotate(-9deg);
   text-align: center;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   font-weight: 700;
-  line-height: 1;
+  line-height: 1.15;
 }
 
 .hero-stamp i {
@@ -508,6 +509,17 @@ h2 {
   font-size: 1.05rem;
 }
 
+.statement-copy .registration-line {
+  margin: 0 0 28px;
+  color: var(--navy);
+  font-size: 0.95rem;
+}
+
+.registration-line strong {
+  font-weight: 800;
+  letter-spacing: 0.02em;
+}
+
 .focus {
   background: var(--cream);
 }
@@ -537,8 +549,10 @@ h2 {
 
 .focus-card {
   position: relative;
-  min-height: 420px;
-  padding: 34px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 28px;
   overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -552,15 +566,16 @@ h2 {
 
 .focus-card h3 {
   max-width: 380px;
-  margin: 70px 0 16px;
+  margin: 18px 0 12px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(2rem, 3vw, 2.8rem);
+  font-size: clamp(1.85rem, 2.8vw, 2.45rem);
   font-weight: 400;
-  line-height: 1.05;
+  line-height: 1.08;
 }
 
 .focus-card > p {
   max-width: 500px;
+  margin-bottom: 0;
   color: inherit;
   opacity: 0.78;
 }
@@ -569,7 +584,7 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin: 26px 0 0;
+  margin: 18px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -599,9 +614,11 @@ h2 {
   aspect-ratio: 1;
   border: 1px solid currentColor;
   border-radius: 50%;
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 1.1rem;
-  font-weight: 700;
+}
+
+.focus-icon svg {
+  width: 26px;
+  height: 26px;
 }
 
 .card-navy {
@@ -755,7 +772,7 @@ h2 {
 }
 
 .approach-list article > span {
-  color: var(--coral);
+  color: var(--teal);
   font-size: 0.75rem;
   font-weight: 800;
   letter-spacing: 0.12em;
@@ -869,13 +886,15 @@ h2 {
   padding-bottom: 55px;
 }
 
-.footer-brand > p {
-  margin: 22px 0 0;
-  color: rgba(255, 255, 255, 0.46);
-  font-size: 0.8rem;
-  font-weight: 800;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+.footer-brand > p,
+.brand-tagline {
+  margin: 18px 0 0;
+  color: #7ec8c9;
+  font-size: 0.82rem;
+  font-weight: 700;
+  font-style: italic;
+  letter-spacing: 0.02em;
+  text-transform: none;
 }
 
 .footer-address > span {
@@ -954,7 +973,7 @@ h2 {
   .site-nav {
     position: fixed;
     inset: 0;
-    z-index: -1;
+    z-index: 1;
     display: grid;
     place-content: center;
     gap: 24px;
@@ -968,9 +987,21 @@ h2 {
     transition: opacity 180ms ease, visibility 180ms ease;
   }
 
+  .nav-shell {
+    position: relative;
+    z-index: 2;
+  }
+
   .site-nav.open {
     visibility: visible;
     opacity: 1;
+  }
+
+  body.menu-open .site-header,
+  body.menu-open .site-header.scrolled {
+    background: transparent;
+    box-shadow: none;
+    backdrop-filter: none;
   }
 
   .nav-cta {
@@ -1010,6 +1041,7 @@ h2 {
 
   .hero-stamp {
     left: -58px;
+    width: 124px;
   }
 
   .section-heading {
@@ -1104,12 +1136,7 @@ h2 {
   }
 
   .focus-card {
-    min-height: 370px;
-    padding: 27px;
-  }
-
-  .focus-card h3 {
-    margin-top: 55px;
+    padding: 24px;
   }
 
   .academy-media {
