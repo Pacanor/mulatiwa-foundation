@@ -1,0 +1,285 @@
+const fs = require("fs");
+const path = require("path");
+const http = require("http");
+const https = require("https");
+const express = require("express");
+const dotenv = require("dotenv");
+const cron = require("node-cron");
+const { createCaptureContext } = require("./cybersource");
+const { enrichDonation } = require("./donations");
+const { recordDonation, ledgerReady } = require("./ledger");
+const { sendDonationEmails } = require("./mail");
+const { runWeeklyReport } = require("./weekly-report");
+
+dotenv.config({ path: path.join(__dirname, "..", ".env") });
+
+const ROOT = path.join(__dirname, "..");
+const PORT = Number(process.env.PORT) || 8080;
+const ALLOWED_CURRENCIES = new Set(["USD", "ZMW"]);
+const MAX_AMOUNT = {
+  USD: 25000,
+  ZMW: 500000,
+};
+const MIN_AMOUNT = {
+  USD: 1,
+  ZMW: 10,
+};
+
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}`);
+  }
+  return value;
+}
+
+function parseAllowedOrigins() {
+  const raw = process.env.TARGET_ORIGINS || "";
+  return raw
+    .split(",")
+    .map((origin) => origin.trim().replace(/\/$/, ""))
+    .filter(Boolean)
+    .filter((origin) => origin.startsWith("https://"));
+}
+
+function resolveRequestOrigin(req) {
+  const allowed = parseAllowedOrigins();
+  const headerOrigin = String(req.get("origin") || "")
+    .trim()
+    .replace(/\/$/, "");
+  if (headerOrigin && allowed.includes(headerOrigin)) {
+    return headerOrigin;
+  }
+
+  const referer = String(req.get("referer") || "").trim();
+  if (referer) {
+    try {
+      const refererOrigin = new URL(referer).origin;
+      if (allowed.includes(refererOrigin)) {
+        return refererOrigin;
+      }
+    } catch {
+      // ignore invalid referer
+    }
+  }
+
+  return null;
+}
+
+function normalizeAmount(value, currency) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount)) {
+    return null;
+  }
+  const rounded = Math.round(amount * 100) / 100;
+  if (rounded < MIN_AMOUNT[currency] || rounded > MAX_AMOUNT[currency]) {
+    return null;
+  }
+  return rounded.toFixed(2);
+}
+
+function loadDevHttpsOptions() {
+  const keyPath = path.join(__dirname, "certs", "dev-key.pem");
+  const certPath = path.join(__dirname, "certs", "dev-cert.pem");
+  if (!fs.existsSync(keyPath) || !fs.existsSync(certPath)) {
+    return null;
+  }
+  return {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath),
+  };
+}
+
+const app = express();
+app.disable("x-powered-by");
+app.use(express.json({ limit: "32kb" }));
+
+app.get("/api/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    cybs_env: process.env.CYBS_ENV || "test",
+    donate_ready: Boolean(
+      process.env.MERCHANT_ID && process.env.CYBS_KEY_ID && process.env.CYBS_SECRET_KEY,
+    ),
+    mail_ready: Boolean(process.env.RESEND_API_KEY),
+    ledger_ready: ledgerReady(),
+  });
+});
+
+app.post("/api/donate/session", async (req, res) => {
+  try {
+    const currency = String(req.body?.currency || "")
+      .trim()
+      .toUpperCase();
+    if (!ALLOWED_CURRENCIES.has(currency)) {
+      return res.status(400).json({
+        error: "Please choose USD or ZMW to continue.",
+      });
+    }
+
+    const amount = normalizeAmount(req.body?.amount, currency);
+    if (!amount) {
+      return res.status(400).json({
+        error: `Please enter an amount between ${MIN_AMOUNT[currency]} and ${MAX_AMOUNT[currency].toLocaleString("en-ZM")} ${currency}.`,
+      });
+    }
+
+    // Unified Checkout requires every listed targetOrigin to match the page.
+    // Send only the caller's origin (must be in TARGET_ORIGINS allowlist).
+    const requestOrigin = resolveRequestOrigin(req);
+    if (!requestOrigin) {
+      return res.status(403).json({
+        error: "We're having some trouble proceeding right now. Please try again later.",
+      });
+    }
+
+    const session = await createCaptureContext({
+      merchantId: requireEnv("MERCHANT_ID"),
+      keyId: requireEnv("CYBS_KEY_ID"),
+      secretKey: requireEnv("CYBS_SECRET_KEY"),
+      env: process.env.CYBS_ENV === "production" ? "production" : "test",
+      targetOrigins: [requestOrigin],
+      amount,
+      currency,
+    });
+
+    return res.json({
+      amount,
+      currency,
+      capture_context: session.capture_context,
+      client_library: session.client_library,
+      client_library_integrity: session.client_library_integrity,
+    });
+  } catch (error) {
+    console.error("[donate/session]", error.message, error.details || "");
+    const status = error.status && error.status >= 400 && error.status < 600 ? error.status : 502;
+    return res.status(status).json({
+      error: "We're having some trouble proceeding right now. Please try again later.",
+      detail: process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+app.post("/api/donate/complete", async (req, res) => {
+  try {
+    const status = String(req.body?.status || "approved").toLowerCase();
+    const currency = String(req.body?.currency || "")
+      .trim()
+      .toUpperCase();
+    const amount = normalizeAmount(req.body?.amount, currency);
+    if (!amount || !ALLOWED_CURRENCIES.has(currency)) {
+      return res.status(400).json({ error: "Invalid donation details." });
+    }
+
+    if (status !== "approved") {
+      return res.json({ ok: true, recorded: false });
+    }
+
+    const donation = await enrichDonation({
+      amount,
+      currency,
+      reference: req.body?.reference || "",
+      resultJwt: req.body?.result_jwt || "",
+    });
+
+    // Prefer client-provided contact fields when Payment Details is unavailable.
+    if (!donation.email && req.body?.email) donation.email = String(req.body.email).trim();
+    if (!donation.name && req.body?.name) donation.name = String(req.body.name).trim();
+
+    await recordDonation(donation);
+    await sendDonationEmails(donation);
+
+    return res.json({
+      ok: true,
+      recorded: true,
+      donor_email_sent: Boolean(donation.email),
+      reference: donation.reference,
+    });
+  } catch (error) {
+    console.error("[donate/complete]", error.message);
+    return res.status(500).json({
+      error: "We're having some trouble proceeding right now. Please try again later.",
+    });
+  }
+});
+
+// Dev helper: send sample donor + staff emails without a live payment.
+app.post("/api/donate/test-email", async (req, res) => {
+  const allowed =
+    process.env.ALLOW_TEST_EMAIL === "true" || process.env.NODE_ENV !== "production";
+  if (!allowed) {
+    return res.status(403).json({ error: "Test email endpoint disabled." });
+  }
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(400).json({
+      error: "Set RESEND_API_KEY in .env before testing emails.",
+    });
+  }
+
+  try {
+    const donation = {
+      amount: req.body?.amount || "50.00",
+      currency: String(req.body?.currency || "USD").toUpperCase(),
+      name: req.body?.name || "Test Donor",
+      email: req.body?.email || process.env.TEST_DONOR_EMAIL || "",
+      reference: req.body?.reference || `TEST-${Date.now()}`,
+      whenIso: new Date().toISOString(),
+      status: "approved",
+    };
+
+    if (!donation.email) {
+      return res.status(400).json({
+        error: "Provide email in the body, or set TEST_DONOR_EMAIL in .env.",
+      });
+    }
+
+    await sendDonationEmails(donation);
+    return res.json({
+      ok: true,
+      sent_to_donor: donation.email,
+      sent_to_staff: process.env.DONATION_NOTIFY_EMAIL || "e.munalula@mulatiwafoundation.org",
+    });
+  } catch (error) {
+    console.error("[donate/test-email]", error.message);
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.use(express.static(ROOT, { extensions: ["html"], index: "index.html" }));
+
+app.use((_req, res) => {
+  res.status(404).type("text").send("Not found");
+});
+
+if (process.env.WEEKLY_REPORT_CRON !== "false") {
+  // Monday 08:30 Africa/Lusaka (CAT)
+  cron.schedule(
+    "30 8 * * 1",
+    () => {
+      runWeeklyReport().catch((error) => {
+        console.error("[weekly-report]", error.message);
+      });
+    },
+    { timezone: "Africa/Lusaka" },
+  );
+  console.log("Weekly donation report scheduled for Mondays 08:30 Africa/Lusaka");
+}
+
+const useHttps = process.env.DEV_HTTPS !== "false";
+const httpsOptions = useHttps ? loadDevHttpsOptions() : null;
+
+if (httpsOptions) {
+  https.createServer(httpsOptions, app).listen(PORT, () => {
+    console.log(`Mulatiwa Foundation listening on https://localhost:${PORT}`);
+    console.log("Accept the self-signed certificate warning once, then open /donate.html");
+  });
+} else {
+  http.createServer(app).listen(PORT, () => {
+    console.log(`Mulatiwa Foundation listening on http://localhost:${PORT}`);
+    if (process.env.NODE_ENV !== "production") {
+      console.warn(
+        "Cybersource requires HTTPS targetOrigins. Add server/certs or set TARGET_ORIGINS to your HTTPS deploy URL.",
+      );
+    }
+  });
+}

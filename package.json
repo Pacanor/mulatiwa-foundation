@@ -1,0 +1,22 @@
+{
+  "name": "mulatiwa-foundation",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Mulatiwa Foundation website with Cybersource donation checkout",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "smoke": "node server/smoke.js",
+    "test-email": "node scripts/test-email.js",
+    "weekly-report": "node -e \"require('dotenv').config(); require('./server/weekly-report').runWeeklyReport()\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^3.0.3"
+  }
+}

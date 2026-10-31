@@ -1,0 +1,231 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Support Mulatiwa Foundation with a gift in USD or ZMW. Your donation strengthens education, leadership and community wellbeing across Zambia."
+    />
+    <meta name="theme-color" content="#1B5EA8" />
+    <meta property="og:title" content="Donate | Mulatiwa Foundation" />
+    <meta
+      property="og:description"
+      content="Donate in USD or ZMW. Every gift helps Mulatiwa Foundation turn potential into progress."
+    />
+    <meta property="og:type" content="website" />
+    <title>Donate | Mulatiwa Foundation</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,600;0,700;0,800&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="icon"
+      type="image/svg+xml"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%231B5EA8'/%3E%3Ctext x='32' y='42' text-anchor='middle' font-family='Georgia,serif' font-size='22' font-weight='700' fill='%23E8C23A'%3EMF%3C/text%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./script.js" defer></script>
+    <script src="./donate.js" defer></script>
+  </head>
+  <body class="donate-page">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header scrolled" data-header>
+      <div class="nav-shell">
+        <a class="brand brand-on-dark" href="./index.html#top" aria-label="Mulatiwa Foundation home">
+          <span class="brand-mark" aria-hidden="true">MF</span>
+          <span class="brand-copy">
+            <strong>Mulatiwa</strong>
+            <small>Foundation</small>
+          </span>
+        </a>
+
+        <button class="menu-button" type="button" aria-expanded="false" aria-controls="site-nav">
+          <span></span><span></span><span></span>
+          <span class="sr-only">Open navigation</span>
+        </button>
+
+        <nav class="site-nav" id="site-nav" aria-label="Main navigation">
+          <a href="./index.html#about">About</a>
+          <a href="./index.html#work">Our work</a>
+          <a href="./index.html#academy">Mulatiwa Academy</a>
+          <a href="./index.html#leadership">Leadership</a>
+          <a href="./index.html#contact">Partner with us</a>
+          <a class="nav-cta is-current" href="./donate.html" aria-current="page">Donate</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="donate-hero" aria-labelledby="donate-title">
+        <div class="donate-hero-glow" aria-hidden="true"></div>
+        <div class="container donate-layout" data-reveal>
+          <div class="donate-copy">
+            <p class="eyebrow light">Give</p>
+            <h1 id="donate-title">Fuel progress<br />across Zambia.</h1>
+            <p class="donate-intro">
+              Your gift helps Mulatiwa Foundation equip girls, women, young people and
+              underserved communities with education, skills and support that lasts.
+            </p>
+            <p class="donate-note">
+              Donations can be made in USD or ZMW via card payments, which are processed
+              securely on Cybersource. We do not retain any of your card details.
+            </p>
+          </div>
+
+          <div class="donate-panel" data-donate>
+            <div class="donate-step" data-step="amount">
+              <div class="currency-toggle" role="group" aria-label="Donation currency">
+                <button type="button" class="currency-option is-active" data-currency="USD" aria-pressed="true">
+                  USD
+                </button>
+                <button type="button" class="currency-option" data-currency="ZMW" aria-pressed="false">
+                  ZMW
+                </button>
+              </div>
+
+              <p class="donate-prompt" id="amount-label">Choose an amount</p>
+              <div class="amount-grid" role="group" aria-labelledby="amount-label" data-amount-grid></div>
+
+              <label class="custom-amount">
+                <span>Or enter your own</span>
+                <span class="custom-amount-field">
+                  <span class="currency-prefix" data-currency-prefix>$</span>
+                  <input
+                    type="number"
+                    name="custom-amount"
+                    inputmode="decimal"
+                    min="1"
+                    step="0.01"
+                    placeholder="0.00"
+                    data-custom-amount
+                    aria-label="Custom donation amount"
+                  />
+                </span>
+              </label>
+
+              <p class="impact-line" data-impact>
+                Gifts like this from you will keep us moving.
+              </p>
+
+              <button type="button" class="button button-gold donate-submit" data-continue>
+                Donate securely
+              </button>
+              <p class="donate-error" data-error hidden role="alert"></p>
+            </div>
+
+            <div class="donate-step donate-checkout" data-step="checkout" hidden>
+              <button type="button" class="donate-back" data-back>
+                ← Change amount
+              </button>
+              <p class="donate-checkout-title" data-summary></p>
+              <p class="donate-checkout-copy">
+                Enter your card details in the secure payment window. We do not retain any of
+                your card details.
+              </p>
+              <div id="ucPaymentContainer" class="uc-payment-host" aria-live="polite"></div>
+              <p class="donate-status" data-status hidden role="status"></p>
+              <p class="donate-error" data-checkout-error hidden role="alert"></p>
+            </div>
+
+            <div class="donate-step donate-result donate-result-success" data-step="thanks" hidden>
+              <div class="result-burst" aria-hidden="true">
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+                <span></span><span></span><span></span><span></span><span></span><span></span>
+              </div>
+              <div class="result-heading result-heading-success">
+                <span class="result-mark result-mark-success" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none">
+                    <circle class="result-ring" cx="24" cy="24" r="21" />
+                    <path class="result-check" d="M14 25 L21 32 L34 16" />
+                  </svg>
+                </span>
+                <h2 data-result-title>Donation successful!</h2>
+              </div>
+              <p class="result-lead" data-result-lead>
+                Thank you for your gift.
+              </p>
+              <p data-thanks-copy>
+                Because of you, more girls, women, young people and communities across Zambia
+                can access education, skills and care that lasts. We are grateful.
+              </p>
+              <div class="donate-thanks-actions" data-result-actions>
+                <a class="button button-gold" href="./index.html#work">See our work</a>
+                <button type="button" class="button button-light" data-give-again>
+                  Give again
+                </button>
+              </div>
+            </div>
+
+            <div class="donate-step donate-result donate-result-declined" data-step="declined" hidden>
+              <div class="result-heading result-heading-declined">
+                <span class="result-mark result-mark-declined" aria-hidden="true">
+                  <svg viewBox="0 0 48 48" fill="none">
+                    <circle class="result-ring" cx="24" cy="24" r="21" />
+                    <path class="result-cross" d="M16 16 L32 32" />
+                    <path class="result-cross" d="M32 16 L16 32" />
+                  </svg>
+                </span>
+                <h2>Donation unsuccessful</h2>
+              </div>
+              <p class="result-lead">Nothing was charged.</p>
+              <p>Try another card, or write to us if you need help.</p>
+              <div class="donate-thanks-actions">
+                <button type="button" class="button button-gold" data-give-again>
+                  Try again
+                </button>
+                <a
+                  class="button button-light"
+                  href="mailto:e.munalula@mulatiwafoundation.org?subject=Donation%20help&body=Hi.%20I%20just%20tried%20to%20make%20a%20donation%20and%20it%20seems%20to%20have%20failed.%0A%0A"
+                >Contact us</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="container footer-grid">
+        <div class="footer-brand">
+          <a class="brand brand-on-dark" href="./index.html#top" aria-label="Back to home">
+            <span class="brand-mark" aria-hidden="true">MF</span>
+            <span class="brand-copy"><strong>Mulatiwa</strong><small>Foundation</small></span>
+          </a>
+          <p class="brand-tagline">Building minds, shaping futures</p>
+        </div>
+        <div class="footer-address">
+          <span>Our home</span>
+          <p>
+            <a
+              href="https://maps.app.goo.gl/hscVr8sXrxNxyvjD8"
+              target="_blank"
+              rel="noreferrer"
+            >Plot 272, Corner of Meanwood &amp; Olive Tree Roads<br />Meanwood Ibex Hill, Lusaka, Zambia</a>
+          </p>
+          <p>
+            <a href="mailto:e.munalula@mulatiwafoundation.org">e.munalula@mulatiwafoundation.org</a><br />
+            <a href="tel:+260977796839">+260 977 796 839</a>
+          </p>
+        </div>
+        <div class="footer-links">
+          <a href="./index.html#about">About</a>
+          <a href="./index.html#work">Our work</a>
+          <a href="./index.html#academy">Academy</a>
+          <a href="./index.html#leadership">Leadership</a>
+          <a href="./donate.html">Donate</a>
+          <a href="./index.html#contact">Contact</a>
+        </div>
+      </div>
+      <div class="container footer-bottom">
+        <p>© <span data-year></span> Mulatiwa Foundation. All rights reserved.</p>
+        <p>Registered NGO RNGO 101/2648/2025 · Certified 15 August 2025 under the Non-Governmental Organisations’ Act, 2009 · Lusaka District, Zambia</p>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,2 +1,10 @@
 .DS_Store
 .sites-runtime/
+.env
+node_modules/
+npm-debug.log*
+*.pem
+CyberSourceKey_*.pem
+server/certs/
+data/
+
