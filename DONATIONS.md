@@ -30,11 +30,11 @@ The live app is still the **old static site** (September build). Do **not** edit
 |--------|--------|
 | `MERCHANT_ID` | `zanaco_mulatiwafou` |
 | `CYBS_KEY_ID` / `CYBS_SECRET_KEY` | sandbox keys for now |
-| `TARGET_ORIGINS` | the **new** app’s `https://….ondigitalocean.app` origin (no trailing slash); add your custom domain later |
+| `TARGET_ORIGINS` | `https://mulatiwa-foundation-2-qaz68.ondigitalocean.app` (no trailing slash); add custom domains later. The server also auto-allows its own host. |
 | `RESEND_API_KEY` | from Resend |
 | `RESEND_FROM` | `Mulatiwa Foundation <onboarding@resend.dev>` until domain verified |
 
-5. Also set `PUBLIC_SITE_URL` to that same new HTTPS origin
+5. Set `PUBLIC_SITE_URL` to `https://mulatiwa-foundation-2-qaz68.ondigitalocean.app`
 6. Wait until the new app is **Healthy**. Check:
    - `https://<new-app>/` (landing, no Donate buttons)
    - `https://<new-app>/donate.html`

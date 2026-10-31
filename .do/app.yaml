@@ -60,7 +60,7 @@ services:
         value: e.munalula@mulatiwafoundation.org
       - key: PUBLIC_SITE_URL
         scope: RUN_TIME
-        value: https://mulatiwa-foundation-45bk9.ondigitalocean.app
+        value: https://mulatiwa-foundation-2-qaz68.ondigitalocean.app
       - key: WEEKLY_REPORT_CRON
         scope: RUN_TIME
         value: "true"

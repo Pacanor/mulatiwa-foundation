@@ -33,34 +33,69 @@ function requireEnv(name) {
   return value;
 }
 
+function normalizeOrigin(value) {
+  return String(value || "")
+    .trim()
+    .replace(/\/$/, "");
+}
+
 function parseAllowedOrigins() {
   const raw = process.env.TARGET_ORIGINS || "";
-  return raw
+  const fromEnv = raw
     .split(",")
-    .map((origin) => origin.trim().replace(/\/$/, ""))
+    .map((origin) => normalizeOrigin(origin))
     .filter(Boolean)
     .filter((origin) => origin.startsWith("https://"));
+
+  const publicSite = normalizeOrigin(process.env.PUBLIC_SITE_URL);
+  if (publicSite.startsWith("https://") && !fromEnv.includes(publicSite)) {
+    fromEnv.push(publicSite);
+  }
+
+  return fromEnv;
+}
+
+function requestSelfOrigin(req) {
+  const host = normalizeOrigin(req.get("x-forwarded-host") || req.get("host"));
+  if (!host) return null;
+  const proto = String(req.get("x-forwarded-proto") || "https")
+    .split(",")[0]
+    .trim();
+  if (proto !== "https") return null;
+  // Host may include a port; Origin never includes default 443.
+  const hostname = host.split(",")[0].trim();
+  return normalizeOrigin(`https://${hostname}`);
 }
 
 function resolveRequestOrigin(req) {
-  const allowed = parseAllowedOrigins();
-  const headerOrigin = String(req.get("origin") || "")
-    .trim()
-    .replace(/\/$/, "");
-  if (headerOrigin && allowed.includes(headerOrigin)) {
+  const allowed = new Set(parseAllowedOrigins());
+  const selfOrigin = requestSelfOrigin(req);
+  // Always trust the deployment's own HTTPS origin (covers new App Platform URLs).
+  if (selfOrigin) {
+    allowed.add(selfOrigin);
+  }
+
+  const headerOrigin = normalizeOrigin(req.get("origin"));
+  if (headerOrigin && allowed.has(headerOrigin)) {
     return headerOrigin;
   }
 
   const referer = String(req.get("referer") || "").trim();
   if (referer) {
     try {
-      const refererOrigin = new URL(referer).origin;
-      if (allowed.includes(refererOrigin)) {
+      const refererOrigin = normalizeOrigin(new URL(referer).origin);
+      if (allowed.has(refererOrigin)) {
         return refererOrigin;
       }
     } catch {
       // ignore invalid referer
     }
+  }
+
+  // Same-origin fetch from the donate page may omit Origin in some proxies;
+  // fall back to this host when it is HTTPS.
+  if (selfOrigin && allowed.has(selfOrigin)) {
+    return selfOrigin;
   }
 
   return null;
