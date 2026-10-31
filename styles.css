@@ -341,6 +341,11 @@ h2 {
   gap: 24px;
 }
 
+/* Donate entry points stay out of layout until the Node app reveals them */
+[data-donate-gate][hidden] {
+  display: none !important;
+}
+
 .button {
   display: inline-flex;
   align-items: center;

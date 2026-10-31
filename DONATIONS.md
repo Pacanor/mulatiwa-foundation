@@ -43,7 +43,18 @@ The live app is still the **old static site** (September build). Do **not** edit
 8. When ready: move any custom domain from the old static app to the new one (DNS/App Platform domains). Old static app stays up until you delete it
 9. Optional: if the 1 GiB volume isn’t available on your plan, remove it in the App settings and set `DATA_DIR=/tmp/mulatiwa-data` (CSV won’t survive redeploys until a volume is attached)
 
-### 3. After first production deploy
+### 3. Donate UI gating (static vs app)
+
+Landing-page Donate buttons are marked `data-donate-gate` and stay `hidden` until `script.js` gets `{"status":"ok"}` from `/api/health`.
+
+| Host | `/api/health` | Donate CTAs |
+|------|---------------|-------------|
+| Old static App Platform site | 404 / HTML | Hidden |
+| New Node app | JSON ok | Shown |
+
+So Prof can exercise the full flow on the Node URL while the public static domain stays unchanged. When you point the live domain at the Node app, Donate appears automatically.
+
+### 4. After first production deploy
 
 - [ ] Open live `/donate.html` and run a sandbox card gift (while `CYBS_ENV=test`)
 - [ ] Confirm donor + Esther emails arrive
