@@ -1,12 +1,69 @@
+# Node web service: serves the static site + /api/donate/*
+# Cut over by creating a NEW App Platform app from this spec (see DONATIONS.md)
+# so the existing static site stays live until the new app is healthy.
 name: mulatiwa-foundation
-static_sites:
+services:
   - name: www
     github:
       repo: Pacanor/mulatiwa-foundation
       branch: main
       deploy_on_push: true
-    environment_slug: html
     source_dir: /
-    index_document: index.html
+    environment_slug: node-js
+    build_command: npm ci --omit=dev
+    run_command: npm start
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
     routes:
       - path: /
+    volumes:
+      - name: donation-data
+        mount_path: /data
+        size_gib: 1
+    envs:
+      - key: NODE_ENV
+        scope: RUN_TIME
+        value: production
+      - key: PORT
+        scope: RUN_TIME
+        value: "8080"
+      - key: DEV_HTTPS
+        scope: RUN_TIME
+        value: "false"
+      - key: CYBS_ENV
+        scope: RUN_TIME
+        value: test
+      - key: DATA_DIR
+        scope: RUN_TIME
+        value: /data
+      - key: MERCHANT_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: CYBS_KEY_ID
+        scope: RUN_TIME
+        type: SECRET
+      - key: CYBS_SECRET_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: TARGET_ORIGINS
+        scope: RUN_TIME
+        type: SECRET
+      - key: RESEND_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: RESEND_FROM
+        scope: RUN_TIME
+        type: SECRET
+      - key: DONATION_NOTIFY_EMAIL
+        scope: RUN_TIME
+        value: e.munalula@mulatiwafoundation.org
+      - key: PUBLIC_SITE_URL
+        scope: RUN_TIME
+        value: https://mulatiwa-foundation-45bk9.ondigitalocean.app
+      - key: WEEKLY_REPORT_CRON
+        scope: RUN_TIME
+        value: "true"
+      - key: ALLOW_TEST_EMAIL
+        scope: RUN_TIME
+        value: "false"

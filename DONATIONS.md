@@ -17,19 +17,31 @@ Code and DigitalOcean env wiring are in place. Finish these outside the repo:
 
 Until you verify a sending domain on Resend, keep `RESEND_FROM=Mulatiwa Foundation <onboarding@resend.dev>` and send test mail only to the email on your Resend account.
 
-### 2. DigitalOcean App Platform secrets
+### 2. DigitalOcean cutover (keep the current site live)
 
-In the App → Settings → App-Level / component env vars, set:
+The live app is still the **old static site** (September build). Do **not** edit that app’s component type in place. Spin up a parallel Node app, then switch traffic when it looks good.
+
+1. In DigitalOcean → **Apps** → **Create App** → GitHub → `Pacanor/mulatiwa-foundation` → branch `main`
+2. Confirm it detects a **Web Service** (Node) from `.do/app.yaml` with `npm ci` / `npm start`, HTTP port `8080`
+3. If the UI offers to import the app spec, accept `.do/app.yaml`
+4. Add secrets before the first deploy finishes (or edit and redeploy):
 
 | Secret | Value |
 |--------|--------|
 | `MERCHANT_ID` | `zanaco_mulatiwafou` |
-| `CYBS_KEY_ID` / `CYBS_SECRET_KEY` | sandbox keys for now; swap to production keys at cutover |
-| `TARGET_ORIGINS` | `https://mulatiwa-foundation-45bk9.ondigitalocean.app` (add custom domain later) |
+| `CYBS_KEY_ID` / `CYBS_SECRET_KEY` | sandbox keys for now |
+| `TARGET_ORIGINS` | the **new** app’s `https://….ondigitalocean.app` origin (no trailing slash); add your custom domain later |
 | `RESEND_API_KEY` | from Resend |
 | `RESEND_FROM` | `Mulatiwa Foundation <onboarding@resend.dev>` until domain verified |
 
-Already set in `.do/app.yaml`: `DATA_DIR=/data` with a 1 GiB volume, `ALLOW_TEST_EMAIL=false`, `WEEKLY_REPORT_CRON=true`, notify email, public site URL. Push/redeploy after secrets are filled.
+5. Also set `PUBLIC_SITE_URL` to that same new HTTPS origin
+6. Wait until the new app is **Healthy**. Check:
+   - `https://<new-app>/` (landing, no Donate buttons)
+   - `https://<new-app>/donate.html`
+   - `https://<new-app>/api/health` → JSON with `donate_ready` / `mail_ready`
+7. Share the new donate URL with Prof for review
+8. When ready: move any custom domain from the old static app to the new one (DNS/App Platform domains). Old static app stays up until you delete it
+9. Optional: if the 1 GiB volume isn’t available on your plan, remove it in the App settings and set `DATA_DIR=/tmp/mulatiwa-data` (CSV won’t survive redeploys until a volume is attached)
 
 ### 3. After first production deploy
 
