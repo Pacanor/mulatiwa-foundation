@@ -8,7 +8,8 @@ async function sendWeeklyReportEmail(summary) {
     return;
   }
 
-  const from = process.env.RESEND_FROM || "Mulatiwa Foundation <onboarding@resend.dev>";
+  const from =
+    process.env.RESEND_FROM || "Mulatiwa Foundation <donations@mulatiwafoundation.org>";
   const start = new Date(summary.startIso).toLocaleDateString("en-ZM", {
     timeZone: "Africa/Lusaka",
     dateStyle: "medium",

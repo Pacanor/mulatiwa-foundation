@@ -15,7 +15,7 @@ Code and DigitalOcean env wiring are in place. Finish these outside the repo:
 | Resend | Create API key at [resend.com](https://resend.com) → put in `.env` as `RESEND_API_KEY` → set `TEST_DONOR_EMAIL` to your inbox → restart `npm start` → run `npm run test-email` (or `node scripts/test-email.js you@email.com`) |
 | Sandbox gift | Visa `4111111111111111` / `12/2026` / `123` on `/donate.html` → confirm success UI + emails + new row in `data/donations.csv` |
 
-Until you verify a sending domain on Resend, keep `RESEND_FROM=Mulatiwa Foundation <onboarding@resend.dev>` and send test mail only to the email on your Resend account.
+Verified domain sending uses `RESEND_FROM=Mulatiwa Foundation <donations@mulatiwafoundation.org>`.
 
 ### 2. DigitalOcean cutover (keep the current site live)
 
@@ -32,7 +32,7 @@ The live app is still the **old static site** (September build). Do **not** edit
 | `CYBS_KEY_ID` / `CYBS_SECRET_KEY` | sandbox keys for now |
 | `TARGET_ORIGINS` | `https://mulatiwa-foundation-2-qaz68.ondigitalocean.app` (no trailing slash); add custom domains later. The server also auto-allows its own host. |
 | `RESEND_API_KEY` | from Resend |
-| `RESEND_FROM` | `Mulatiwa Foundation <onboarding@resend.dev>` until domain verified |
+| `RESEND_FROM` | `Mulatiwa Foundation <donations@mulatiwafoundation.org>` |
 
 5. Set `PUBLIC_SITE_URL` to `https://mulatiwa-foundation-2-qaz68.ondigitalocean.app`
 6. Wait until the new app is **Healthy**. Check:
@@ -129,7 +129,7 @@ You should receive:
 - donor thank-you at the address you passed
 - staff alert at `DONATION_NOTIFY_EMAIL` (default Prof. Esther)
 
-On Resend’s free tier without a verified domain, use `RESEND_FROM=Mulatiwa Foundation <onboarding@resend.dev>` and send only to your own Resend account email until the domain is verified.
+From address: `Mulatiwa Foundation <donations@mulatiwafoundation.org>` (domain verified in Resend).
 
 ### Successful gift end-to-end
 

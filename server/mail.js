@@ -1,7 +1,9 @@
 const SITE_URL =
-  process.env.PUBLIC_SITE_URL || "https://mulatiwa-foundation-45bk9.ondigitalocean.app";
+  process.env.PUBLIC_SITE_URL ||
+  "https://mulatiwa-foundation-2-qaz68.ondigitalocean.app";
 const FROM =
-  process.env.RESEND_FROM || "Mulatiwa Foundation <onboarding@resend.dev>";
+  process.env.RESEND_FROM ||
+  "Mulatiwa Foundation <donations@mulatiwafoundation.org>";
 const STAFF_TO = process.env.DONATION_NOTIFY_EMAIL || "e.munalula@mulatiwafoundation.org";
 
 function formatMoney(amount, currency) {

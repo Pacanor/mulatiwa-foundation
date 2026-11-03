@@ -54,7 +54,7 @@ services:
         type: SECRET
       - key: RESEND_FROM
         scope: RUN_TIME
-        type: SECRET
+        value: Mulatiwa Foundation <donations@mulatiwafoundation.org>
       - key: DONATION_NOTIFY_EMAIL
         scope: RUN_TIME
         value: e.munalula@mulatiwafoundation.org
@@ -66,4 +66,4 @@ services:
         value: "true"
       - key: ALLOW_TEST_EMAIL
         scope: RUN_TIME
-        value: "false"
+        value: "true"
