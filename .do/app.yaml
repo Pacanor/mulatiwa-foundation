@@ -66,4 +66,4 @@ services:
         value: "true"
       - key: ALLOW_TEST_EMAIL
         scope: RUN_TIME
-        value: "true"
+        value: "false"
