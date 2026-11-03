@@ -8,7 +8,11 @@ const cron = require("node-cron");
 const { createCaptureContext } = require("./cybersource");
 const { enrichDonation } = require("./donations");
 const { recordDonation, ledgerReady } = require("./ledger");
-const { sendDonationEmails } = require("./mail");
+const {
+  sendDonationEmails,
+  donorThankYouHtml,
+  staffNotifyHtml,
+} = require("./mail");
 const { runWeeklyReport } = require("./weekly-report");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -236,6 +240,23 @@ app.post("/api/donate/complete", async (req, res) => {
       error: "We're having some trouble proceeding right now. Please try again later.",
     });
   }
+});
+
+// Browser preview of branded donation emails (no send).
+app.get("/api/donate/email-preview", (req, res) => {
+  const kind = String(req.query.kind || "donor").toLowerCase();
+  const donation = {
+    amount: req.query.amount || "50.00",
+    currency: String(req.query.currency || "USD").toUpperCase(),
+    name: req.query.name || "Papias",
+    email: req.query.email || "papiasb@gmail.com",
+    reference: req.query.reference || "PREVIEW-REF",
+    whenIso: new Date().toISOString(),
+  };
+
+  const html =
+    kind === "staff" ? staffNotifyHtml(donation) : donorThankYouHtml(donation);
+  res.type("html").send(html);
 });
 
 // Dev helper: send sample donor + staff emails without a live payment.

@@ -6,6 +6,22 @@ const FROM =
   "Mulatiwa Foundation <donations@mulatiwafoundation.org>";
 const STAFF_TO = process.env.DONATION_NOTIFY_EMAIL || "e.munalula@mulatiwafoundation.org";
 
+const NAVY = "#123a6d";
+const NAVY_DEEP = "#0c2a52";
+const GOLD = "#e8c23a";
+const CREAM = "#f6f3ea";
+const PAPER = "#fffdf8";
+const INK = "#17212b";
+const MUTED = "#66727e";
+
+function escapeHtml(value) {
+  return String(value == null ? "" : value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function formatMoney(amount, currency) {
   const value = Number(amount);
   const formatted = value.toLocaleString("en-ZM", {
@@ -43,43 +59,216 @@ async function sendWithResend({ to, subject, html }) {
   return { ok: true, body };
 }
 
-function donorThankYouHtml({ name, amount, currency }) {
-  const greeting = name ? `Dear ${name},` : "Dear friend,";
-  const money = formatMoney(amount, currency);
+function emailShell({ preheader, bodyHtml }) {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mulatiwa Foundation</title>
+</head>
+<body style="margin:0;padding:0;background:${CREAM};">
+  <div style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent;">
+    ${escapeHtml(preheader)}
+  </div>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${CREAM};margin:0;padding:0;">
+    <tr>
+      <td align="center" style="padding:28px 16px 40px;">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;background:${PAPER};border-radius:18px;overflow:hidden;border:1px solid rgba(18,58,109,0.10);">
+          ${bodyHtml}
+        </table>
+        <p style="margin:18px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.5;color:${MUTED};max-width:560px;">
+          Registered NGO RNGO 101/2648/2025 · Lusaka, Zambia
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+}
+
+function brandHeader({ eyebrow }) {
   return `
-  <div style="font-family:Georgia,'Times New Roman',serif;color:#17212b;line-height:1.6;max-width:560px;margin:0 auto;">
-    <p style="color:#1b5ea8;font-family:'Source Sans 3',Helvetica,Arial,sans-serif;font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;">Thank you</p>
-    <h1 style="font-size:28px;line-height:1.2;color:#123a6d;margin:0 0 16px;">Your generosity keeps Mulatiwa moving.</h1>
-    <p>${greeting}</p>
-    <p>Thank you for your gift of <strong>${money}</strong>. Your support helps us equip girls, women, young people and underserved communities across Zambia with education, skills and care that lasts.</p>
-    <p>Gifts like yours strengthen learning pathways, leadership opportunities and community wellbeing, from classrooms to care for older persons.</p>
-    <p style="margin:28px 0 12px;">
-      <a href="${SITE_URL}/donate.html" style="display:inline-block;background:#e8c23a;color:#123a6d;text-decoration:none;padding:12px 20px;border-radius:999px;font-family:'Source Sans 3',Helvetica,Arial,sans-serif;font-weight:800;">Give again</a>
-      <a href="${SITE_URL}/index.html#work" style="display:inline-block;margin-left:10px;background:#123a6d;color:#fff;text-decoration:none;padding:12px 20px;border-radius:999px;font-family:'Source Sans 3',Helvetica,Arial,sans-serif;font-weight:800;">See our work</a>
-    </p>
-    <p style="color:#66727e;font-size:14px;">With gratitude,<br/>Mulatiwa Foundation</p>
-  </div>`;
+  <tr>
+    <td style="background:${NAVY};padding:0;">
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+        <tr>
+          <td style="height:4px;background:${GOLD};font-size:0;line-height:0;">&nbsp;</td>
+        </tr>
+        <tr>
+          <td style="padding:22px 28px 20px;">
+            <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td valign="middle" style="padding-right:12px;">
+                  <div style="width:40px;height:40px;border-radius:12px;background:${GOLD};color:${NAVY};font-family:Georgia,'Times New Roman',serif;font-size:14px;font-weight:700;line-height:40px;text-align:center;">
+                    MF
+                  </div>
+                </td>
+                <td valign="middle">
+                  <div style="font-family:Helvetica,Arial,sans-serif;color:#ffffff;font-size:16px;font-weight:800;letter-spacing:0.01em;">
+                    Mulatiwa Foundation
+                  </div>
+                  <div style="font-family:Helvetica,Arial,sans-serif;color:rgba(255,255,255,0.72);font-size:12px;margin-top:2px;">
+                    Building minds, shaping futures
+                  </div>
+                </td>
+              </tr>
+            </table>
+            <p style="margin:18px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:${GOLD};">
+              ${escapeHtml(eyebrow)}
+            </p>
+          </td>
+        </tr>
+      </table>
+    </td>
+  </tr>`;
+}
+
+function emailFooter() {
+  return `
+  <tr>
+    <td style="background:${NAVY_DEEP};padding:22px 28px;">
+      <p style="margin:0 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:13px;font-weight:700;color:#ffffff;">
+        Mulatiwa Foundation
+      </p>
+      <p style="margin:0 0 10px;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.55;color:rgba(255,255,255,0.72);">
+        Plot 272, Corner of Meanwood &amp; Olive Tree Roads<br />
+        Meanwood Ibex Hill, Lusaka, Zambia
+      </p>
+      <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.55;">
+        <a href="${SITE_URL}/" style="color:${GOLD};text-decoration:none;">Visit our website</a>
+        <span style="color:rgba(255,255,255,0.35);"> · </span>
+        <a href="mailto:donations@mulatiwafoundation.org" style="color:${GOLD};text-decoration:none;">donations@mulatiwafoundation.org</a>
+      </p>
+    </td>
+  </tr>`;
+}
+
+function donorThankYouHtml({ name, amount, currency }) {
+  const safeName = escapeHtml(name);
+  const greeting = safeName ? `Dear ${safeName},` : "Dear friend,";
+  const money = escapeHtml(formatMoney(amount, currency));
+  const bodyHtml = `
+  ${brandHeader({ eyebrow: "Thank you" })}
+  <tr>
+    <td style="padding:32px 28px 8px;">
+      <h1 style="margin:0 0 18px;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.2;color:${NAVY};font-weight:700;">
+        Your generosity keeps Mulatiwa moving.
+      </h1>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;background:${NAVY};border-radius:14px;">
+        <tr>
+          <td style="padding:18px 20px;text-align:center;">
+            <div style="font-family:Helvetica,Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:${GOLD};">
+              Your gift
+            </div>
+            <div style="margin-top:6px;font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.1;color:#ffffff;font-weight:700;">
+              ${money}
+            </div>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        ${greeting}
+      </p>
+      <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        Thank you for standing with us. Your gift helps equip girls, women, young people and underserved communities across Zambia with education, skills and care that lasts.
+      </p>
+      <p style="margin:0 0 26px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        Gifts like yours strengthen learning pathways, leadership opportunities and community wellbeing, from classrooms to care for older persons.
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px;">
+        <tr>
+          <td style="padding:0 10px 12px 0;">
+            <a href="${SITE_URL}/donate.html" style="display:inline-block;background:${GOLD};color:${NAVY};text-decoration:none;padding:13px 22px;border-radius:999px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:800;">
+              Give again
+            </a>
+          </td>
+          <td style="padding:0 0 12px;">
+            <a href="${SITE_URL}/index.html#work" style="display:inline-block;background:${NAVY};color:#ffffff;text-decoration:none;padding:13px 22px;border-radius:999px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:800;">
+              See our work
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:18px 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.5;color:${NAVY};">
+        With gratitude,<br />
+        <strong>Mulatiwa Foundation</strong>
+      </p>
+    </td>
+  </tr>
+  ${emailFooter()}`;
+
+  return emailShell({
+    preheader: `Thank you for your gift of ${formatMoney(amount, currency)} to Mulatiwa Foundation.`,
+    bodyHtml,
+  });
 }
 
 function staffNotifyHtml({ name, email, amount, currency, reference, whenIso }) {
-  const money = formatMoney(amount, currency);
-  const when = new Date(whenIso).toLocaleString("en-ZM", {
+  const money = escapeHtml(formatMoney(amount, currency));
+  const when = new Date(whenIso || Date.now()).toLocaleString("en-ZM", {
     timeZone: "Africa/Lusaka",
     dateStyle: "full",
     timeStyle: "short",
   });
-  return `
-  <div style="font-family:'Source Sans 3',Helvetica,Arial,sans-serif;color:#17212b;line-height:1.55;max-width:560px;margin:0 auto;">
-    <p style="color:#1b5ea8;font-size:12px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;">New donation</p>
-    <h1 style="font-family:Georgia,serif;font-size:26px;color:#123a6d;margin:0 0 16px;">A gift just came through.</h1>
-    <table style="width:100%;border-collapse:collapse;font-size:15px;">
-      <tr><td style="padding:8px 0;color:#66727e;">Donor</td><td style="padding:8px 0;"><strong>${name || "Not provided"}</strong></td></tr>
-      <tr><td style="padding:8px 0;color:#66727e;">Email</td><td style="padding:8px 0;">${email || "Not provided"}</td></tr>
-      <tr><td style="padding:8px 0;color:#66727e;">Amount</td><td style="padding:8px 0;"><strong>${money}</strong></td></tr>
-      <tr><td style="padding:8px 0;color:#66727e;">When</td><td style="padding:8px 0;">${when} (CAT)</td></tr>
-      <tr><td style="padding:8px 0;color:#66727e;">Reference</td><td style="padding:8px 0;word-break:break-all;">${reference || "n/a"}</td></tr>
-    </table>
-  </div>`;
+  const rows = [
+    ["Donor", name || "Not provided"],
+    ["Email", email || "Not provided"],
+    ["Amount", money],
+    ["When", `${when} (CAT)`],
+    ["Reference", reference || "n/a"],
+  ];
+
+  const detailRows = rows
+    .map(([label, value], index) => {
+      const border =
+        index === rows.length - 1 ? "none" : "1px solid rgba(18,58,109,0.10)";
+      const display = label === "Amount" ? money : escapeHtml(String(value));
+      return `
+      <tr>
+        <td style="padding:12px 0;border-bottom:${border};font-family:Helvetica,Arial,sans-serif;font-size:13px;color:${MUTED};width:34%;vertical-align:top;">
+          ${escapeHtml(label)}
+        </td>
+        <td style="padding:12px 0;border-bottom:${border};font-family:Helvetica,Arial,sans-serif;font-size:15px;color:${INK};font-weight:700;word-break:break-word;">
+          ${display}
+        </td>
+      </tr>`;
+    })
+    .join("");
+
+  const bodyHtml = `
+  ${brandHeader({ eyebrow: "New donation" })}
+  <tr>
+    <td style="padding:32px 28px 12px;">
+      <h1 style="margin:0 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.2;color:${NAVY};font-weight:700;">
+        A gift just came through.
+      </h1>
+      <p style="margin:0 0 22px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:${MUTED};">
+        A supporter has completed a gift on the Mulatiwa Foundation website.
+      </p>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 22px;background:${NAVY};border-radius:14px;">
+        <tr>
+          <td style="padding:18px 20px;text-align:center;">
+            <div style="font-family:Helvetica,Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.16em;text-transform:uppercase;color:${GOLD};">
+              Amount received
+            </div>
+            <div style="margin-top:6px;font-family:Georgia,'Times New Roman',serif;font-size:34px;line-height:1.1;color:#ffffff;font-weight:700;">
+              ${money}
+            </div>
+          </td>
+        </tr>
+      </table>
+      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px;">
+        ${detailRows}
+      </table>
+    </td>
+  </tr>
+  ${emailFooter()}`;
+
+  return emailShell({
+    preheader: `New donation: ${formatMoney(amount, currency)} from ${name || "a donor"}.`,
+    bodyHtml,
+  });
 }
 
 async function sendDonationEmails(donation) {
@@ -116,6 +305,8 @@ async function sendDonationEmails(donation) {
 
 module.exports = {
   sendDonationEmails,
+  donorThankYouHtml,
+  staffNotifyHtml,
   formatMoney,
   STAFF_TO,
 };
