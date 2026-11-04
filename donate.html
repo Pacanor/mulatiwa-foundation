@@ -124,10 +124,13 @@
               </button>
               <p class="donate-checkout-title" data-summary></p>
               <p class="donate-checkout-copy">
-                Enter your card details in the secure payment window. We do not retain any of
+                Enter your card details in the secure form below. We do not retain any of
                 your card details.
               </p>
-              <div id="ucPaymentContainer" class="uc-payment-host" aria-live="polite"></div>
+              <div class="uc-embed" aria-live="polite">
+                <div id="ucPaymentContainer" class="uc-payment-host"></div>
+                <div id="ucPaymentScreen" class="uc-payment-screen"></div>
+              </div>
               <p class="donate-status" data-status hidden role="status"></p>
               <p class="donate-error" data-checkout-error hidden role="alert"></p>
             </div>

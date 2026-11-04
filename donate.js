@@ -33,6 +33,7 @@
   let activeCheckout = null;
   let checkoutGeneration = 0;
   let stepTransitionTimer = null;
+  let stepResizeObserver = null;
   const stage = root.querySelector(".donate-stage") || root;
   const steps = [amountStep, checkoutStep, thanksStep, declinedStep].filter(Boolean);
 
@@ -65,14 +66,32 @@
   const measureActiveStepHeight = () => {
     const active = steps.find((step) => step.classList.contains("is-active"));
     if (!active || !stage) return;
+    // Checkout embeds Cybersource UI that must not be clipped by a fixed stage height.
+    if (root.classList.contains("is-checkout")) {
+      stage.style.height = "auto";
+      return;
+    }
     stage.style.height = `${active.offsetHeight}px`;
+  };
+
+  const watchActiveStepSize = () => {
+    if (typeof ResizeObserver !== "function") return;
+    if (stepResizeObserver) stepResizeObserver.disconnect();
+    const active = steps.find((step) => step.classList.contains("is-active"));
+    if (!active) return;
+    stepResizeObserver = new ResizeObserver(() => {
+      measureActiveStepHeight();
+    });
+    stepResizeObserver.observe(active);
+    const embed = active.querySelector(".uc-embed");
+    if (embed) stepResizeObserver.observe(embed);
   };
 
   const setStep = (name) => {
     const next = steps.find((step) => step.dataset.step === name);
     if (!next) return;
 
-    if (stage && !stage.style.height) {
+    if (stage && !stage.style.height && name !== "checkout") {
       const current = steps.find((step) => step.classList.contains("is-active")) || next;
       stage.style.height = `${current.offsetHeight}px`;
     }
@@ -87,15 +106,20 @@
 
     root.classList.toggle("is-celebrating", name === "thanks");
     root.classList.toggle("is-soft-fail", name === "declined");
+    root.classList.toggle("is-checkout", name === "checkout");
 
     if (stepTransitionTimer) window.clearTimeout(stepTransitionTimer);
     // Allow the incoming step to paint, then ease the card height to match.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         measureActiveStepHeight();
+        watchActiveStepSize();
       });
     });
-    stepTransitionTimer = window.setTimeout(measureActiveStepHeight, 460);
+    stepTransitionTimer = window.setTimeout(() => {
+      measureActiveStepHeight();
+      watchActiveStepSize();
+    }, 460);
   };
 
   const showApprovedResult = ({ amount, currency: code }) => {
@@ -207,7 +231,9 @@
 
   const clearCheckoutContainers = () => {
     const host = document.getElementById("ucPaymentContainer");
+    const screen = document.getElementById("ucPaymentScreen");
     if (host) host.innerHTML = "";
+    if (screen) screen.innerHTML = "";
   };
 
   const destroyCheckout = () => {
@@ -355,21 +381,26 @@
       }
       measureActiveStepHeight();
 
-      // Trigger opens card entry directly — skips the "Checkout with card" button list.
+      // Embedded checkout keeps the card form inside our panel (sidebar was clipped).
       activeClient = await window.VAS.UnifiedCheckout(payload.capture_context);
       if (generation !== checkoutGeneration) return;
-      activeCheckout = activeClient.createTrigger("PANENTRY", {
-        displayMode: "sidebar",
+      activeCheckout = await activeClient.createCheckout({
         autoProcessing: true,
       });
+      if (generation !== checkoutGeneration) return;
 
       if (statusEl) {
         statusEl.hidden = false;
-        statusEl.textContent = "Complete your gift in the secure payment window.";
+        statusEl.textContent = "Complete your gift in the secure payment form below.";
       }
+      measureActiveStepHeight();
 
-      const mountResponse = await activeCheckout.mount("#ucPaymentContainer");
+      const mountResponse = await activeCheckout.mount({
+        paymentSelection: "#ucPaymentContainer",
+        paymentScreen: "#ucPaymentScreen",
+      });
       if (generation !== checkoutGeneration) return;
+      measureActiveStepHeight();
       const completeResponse = await finalizeCheckoutResult(mountResponse);
       if (generation !== checkoutGeneration) return;
       const reference = extractReference(completeResponse);
