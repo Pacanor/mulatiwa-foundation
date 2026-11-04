@@ -278,6 +278,7 @@ app.post("/api/donate/complete", async (req, res) => {
       donor_email_sent: Boolean(donation.email) && !isSeed && finalStatus === "approved",
       reference: donation.reference,
       status: finalStatus,
+      error_message: donation.error_message || "",
     });
   } catch (error) {
     console.error("[donate/complete]", error.message);

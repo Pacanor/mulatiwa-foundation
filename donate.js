@@ -25,6 +25,8 @@
   const statusEl = root.querySelector("[data-status]");
   const summaryEl = root.querySelector("[data-summary]");
   const resultLeadEl = root.querySelector("[data-result-lead]");
+  const failDetailEl = root.querySelector("[data-fail-detail]");
+  const failMailtoEl = root.querySelector("[data-fail-mailto]");
   const currencyButtons = [...root.querySelectorAll("[data-currency]")];
 
   let currency = "USD";
@@ -83,6 +85,8 @@
       measureActiveStepHeight();
     });
     stepResizeObserver.observe(active);
+    const embed = active.querySelector(".uc-embed");
+    if (embed) stepResizeObserver.observe(embed);
   };
 
   const setStep = (name) => {
@@ -124,6 +128,42 @@
       resultLeadEl.textContent = `Thank you for your ${formatAmount(amount, code)} gift.`;
     }
     setStep("thanks");
+  };
+
+  const friendlyFailureCopy = (raw) => {
+    const text = String(raw || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!text) {
+      return "The payment could not be completed. Try another card, or write to us if you need help.";
+    }
+    if (/decision is reject|non 3ds|reason 481|481/i.test(text)) {
+      return "The payment was authorised by the card network, but Cybersource Decision Manager rejected it (Non‑3DS / reason 481). Nothing was settled. Try another card, or ask Zanaco to adjust the sandbox Decision Manager rule.";
+    }
+    if (/declin/i.test(text)) {
+      return `The card issuer declined this payment (${text}). Nothing was charged.`;
+    }
+    if (/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout|autoProcessing/i.test(text)) {
+      return "The payment could not be completed. Try again in a moment, or write to us if you need help.";
+    }
+    return text;
+  };
+
+  const showDeclinedResult = (rawMessage) => {
+    const detail = friendlyFailureCopy(rawMessage);
+    if (failDetailEl) failDetailEl.textContent = detail;
+    if (failMailtoEl) {
+      failMailtoEl.href =
+        "mailto:e.munalula@mulatiwafoundation.org?subject=" +
+        encodeURIComponent("Donation help") +
+        "&body=" +
+        encodeURIComponent(
+          "Hi.\n\nI tried to make a donation and it was unsuccessful.\n\nDetails shown on the site:\n" +
+            detail +
+            "\n\n",
+        );
+    }
+    setStep("declined");
   };
 
   const notifyComplete = async ({
@@ -227,12 +267,15 @@
     });
 
   const clearCheckoutContainers = () => {
+    const host = document.getElementById("ucPaymentContainer");
+    const screen = document.getElementById("ucPaymentScreen");
     const apple = document.getElementById("ucApplePay");
     const google = document.getElementById("ucGooglePay");
+    if (host) host.innerHTML = "";
+    if (screen) screen.innerHTML = "";
     if (apple) apple.innerHTML = "";
     if (google) google.innerHTML = "";
     if (walletsEl) walletsEl.hidden = true;
-    document.body.classList.remove("uc-open");
   };
 
   const destroyCheckout = () => {
@@ -418,34 +461,36 @@
       showError(checkoutError, "");
       if (statusEl) {
         statusEl.hidden = false;
-        statusEl.textContent = "Opening secure card payment…";
+        statusEl.textContent = "Loading secure card payment…";
       }
       measureActiveStepHeight();
 
-      // Card uses Trigger → sidebar on a body portal (avoids clipping). Wallets mount in-card.
+      // Embedded in-card checkout (selection + payment screen) with live height resizing.
       activeClient = await window.VAS.UnifiedCheckout(payload.capture_context);
       if (generation !== checkoutGeneration) return;
 
       const walletPending = startWalletButtons(activeClient);
-      activeCheckout = activeClient.createTrigger("PANENTRY", {
-        displayMode: "sidebar",
+      activeCheckout = await activeClient.createCheckout({
         autoProcessing: true,
       });
       if (generation !== checkoutGeneration) return;
 
       if (statusEl) {
         statusEl.hidden = false;
-        statusEl.textContent = "Complete your gift in the secure payment window.";
+        statusEl.textContent = "Choose a payment method below.";
       }
       measureActiveStepHeight();
 
-      // Omit the mount target so Unified Checkout owns the fixed sidebar overlay
-      // (mounting into a body div was dumping the form below the footer).
-      document.body.classList.add("uc-open");
-      const cardPending = activeCheckout.mount();
+      const cardPending = activeCheckout.mount({
+        paymentSelection: "#ucPaymentContainer",
+        paymentScreen: "#ucPaymentScreen",
+      });
+      // After the button list paints, grow the card to fit; form step remasures via ResizeObserver.
+      window.setTimeout(measureActiveStepHeight, 120);
+      window.setTimeout(measureActiveStepHeight, 400);
+
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
-      document.body.classList.remove("uc-open");
       measureActiveStepHeight();
       const completeResponse = await finalizeCheckoutResult(mountResponse);
       if (generation !== checkoutGeneration) return;
@@ -471,7 +516,7 @@
       clearCheckoutContainers();
 
       if (recorded?.status && recorded.status !== "approved") {
-        setStep("declined");
+        showDeclinedResult(recorded.error_message || recorded.status);
         return;
       }
 
@@ -490,7 +535,7 @@
         error?.name === "AbortError";
       const declined =
         /DECLIN|REJECT|FAIL|DENIED|NOT_AUTHORIZED|PAYMENT/i.test(String(reason)) ||
-        /declin|rejected|not authorized|payment failed/i.test(rawMessage);
+        /declin|rejected|not authorized|payment failed|decision is reject/i.test(rawMessage);
 
       destroyCheckout();
       clearCheckoutContainers();
@@ -501,8 +546,9 @@
         return;
       }
 
+      const failureDetail = rawMessage || String(reason || "");
+
       if (declined) {
-        setStep("declined");
         try {
           await notifyComplete({
             status: "declined",
@@ -510,17 +556,18 @@
             currency,
             reference: "",
             resultJwt: "",
-            errorMessage: rawMessage || String(reason || ""),
+            errorMessage: failureDetail,
           });
         } catch (notifyError) {
           console.error("[donate] declined notify failed", notifyError);
         }
+        showDeclinedResult(failureDetail);
         return;
       }
 
       const friendly =
         rawMessage &&
-        !/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout/i.test(
+        !/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout|autoProcessing/i.test(
           rawMessage,
         )
           ? rawMessage
@@ -533,20 +580,13 @@
           currency,
           reference: "",
           resultJwt: "",
-          errorMessage: rawMessage || String(reason || friendly),
+          errorMessage: failureDetail || friendly,
         });
       } catch (notifyError) {
         console.error("[donate] failed notify failed", notifyError);
       }
 
-      if (checkoutStep?.classList.contains("is-active")) {
-        showError(checkoutError, friendly);
-        if (statusEl) statusEl.hidden = true;
-        measureActiveStepHeight();
-      } else {
-        showError(amountError, friendly);
-        setStep("amount");
-      }
+      showDeclinedResult(failureDetail || friendly);
     } finally {
       if (generation === checkoutGeneration) {
         resetContinueButton();

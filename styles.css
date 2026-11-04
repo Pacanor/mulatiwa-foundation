@@ -1612,10 +1612,6 @@ h2 {
   width: 100%;
 }
 
-body.uc-open {
-  overflow: hidden;
-}
-
 .donate-wallets {
   display: grid;
   gap: 10px;
@@ -1628,6 +1624,29 @@ body.uc-open {
 
 .donate-wallet-slot:not(:empty) {
   min-height: 48px;
+}
+
+.uc-embed {
+  display: grid;
+  gap: 10px;
+  margin-top: 6px;
+  width: 100%;
+}
+
+.uc-payment-host,
+.uc-payment-screen {
+  width: 100%;
+}
+
+.uc-payment-screen:empty {
+  display: none;
+}
+
+.result-fail-detail {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 @media (prefers-reduced-motion: reduce) {
