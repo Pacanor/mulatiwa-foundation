@@ -253,6 +253,15 @@ app.post("/api/donate/complete", async (req, res) => {
     if (!donation.email && req.body?.email) donation.email = String(req.body.email).trim();
     if (!donation.name && req.body?.name) donation.name = String(req.body.name).trim();
 
+    // Allow backdated SEED-* rows for report demos without affecting live checkout.
+    if (
+      String(donation.reference || "").startsWith("SEED-") &&
+      req.body?.when_iso &&
+      !Number.isNaN(Date.parse(req.body.when_iso))
+    ) {
+      donation.whenIso = new Date(req.body.when_iso).toISOString();
+    }
+
     await recordDonation(donation);
 
     if (normalizedStatus === "approved") {
