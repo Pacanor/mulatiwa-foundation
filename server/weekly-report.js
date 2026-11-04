@@ -1,5 +1,5 @@
-const { buildWeekDonations, summarizeWeek } = require("./ledger");
-const { formatMoney, STAFF_TO } = require("./mail");
+const { buildWeekDonations, summarizeWeek, searchTransactions } = require("./ledger");
+const { formatMoney, STAFF_TO, sendWithResend } = require("./mail");
 const { buildReportUrl } = require("./report-token");
 
 const SITE_URL =
@@ -21,15 +21,69 @@ function escapeHtml(value) {
     .replace(/"/g, "&quot;");
 }
 
-function weeklyReportHtml(summary) {
-  const start = new Date(summary.startIso).toLocaleDateString("en-ZM", {
+function formatRangeLabel(startIso, endIso) {
+  const start = new Date(startIso).toLocaleDateString("en-ZM", {
     timeZone: "Africa/Lusaka",
     dateStyle: "medium",
   });
-  const end = new Date(new Date(summary.endIso).getTime() - 1).toLocaleDateString("en-ZM", {
+  const end = new Date(new Date(endIso).getTime() - 1).toLocaleDateString("en-ZM", {
     timeZone: "Africa/Lusaka",
     dateStyle: "medium",
   });
+  if (start === end) return start;
+  return `${start} to ${end}`;
+}
+
+function periodTitle(period, startIso, endIso) {
+  const range = formatRangeLabel(startIso, endIso);
+  switch (String(period || "")) {
+    case "today":
+      return `Today (${range})`;
+    case "week":
+      return `This week (${range})`;
+    case "month":
+      return `This month (${range})`;
+    case "quarter":
+      return `This quarter (${range})`;
+    case "year":
+      return `This year (${range})`;
+    case "custom":
+      return range;
+    default:
+      return range;
+  }
+}
+
+function summarizeDonations(donations, { startIso, endIso }) {
+  const approved = donations.filter(
+    (row) => String(row.status || "").toLowerCase() === "approved",
+  );
+  const failedCount = donations.filter((row) => {
+    const status = String(row.status || "").toLowerCase();
+    return status && status !== "approved";
+  }).length;
+  const totals = { USD: 0, ZMW: 0 };
+  approved.forEach((row) => {
+    const currency = String(row.currency || "").toUpperCase();
+    if (totals[currency] == null) totals[currency] = 0;
+    totals[currency] += Number(row.amount) || 0;
+  });
+  return {
+    startIso,
+    endIso,
+    count: approved.length,
+    failedCount,
+    totals,
+    rows: approved,
+  };
+}
+
+function periodReportHtml(summary, options = {}) {
+  const title = options.title || periodTitle(options.period, summary.startIso, summary.endIso);
+  const eyebrow = options.eyebrow || "Donations summary";
+  const footerNote =
+    options.footerNote ||
+    "A summary of donations recorded on the Mulatiwa Foundation website.";
   const totalsLine = Object.entries(summary.totals)
     .filter(([, value]) => value > 0)
     .map(([currency, value]) => formatMoney(value, currency))
@@ -52,7 +106,7 @@ function weeklyReportHtml(summary) {
                 <tr>
                   <td style="padding:22px 28px 20px;">
                     <div style="font-family:Helvetica,Arial,sans-serif;color:#fff;font-size:16px;font-weight:800;">Mulatiwa Foundation</div>
-                    <p style="margin:18px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:${GOLD};">Weekly donations</p>
+                    <p style="margin:18px 0 0;font-family:Helvetica,Arial,sans-serif;font-size:11px;font-weight:800;letter-spacing:0.18em;text-transform:uppercase;color:${GOLD};">${escapeHtml(eyebrow)}</p>
                   </td>
                 </tr>
               </table>
@@ -60,9 +114,9 @@ function weeklyReportHtml(summary) {
           </tr>
           <tr>
             <td style="padding:32px 28px 12px;">
-              <h1 style="margin:0 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.2;color:${NAVY};">Week of ${escapeHtml(start)} – ${escapeHtml(end)}</h1>
+              <h1 style="margin:0 0 10px;font-family:Georgia,'Times New Roman',serif;font-size:26px;line-height:1.2;color:${NAVY};">${escapeHtml(title)}</h1>
               <p style="margin:0 0 18px;font-family:Helvetica,Arial,sans-serif;font-size:15px;line-height:1.55;color:${MUTED};">
-                A summary of donations recorded on the Mulatiwa Foundation website.
+                ${escapeHtml(footerNote)}
               </p>
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 18px;background:${NAVY};border-radius:14px;">
                 <tr>
@@ -78,9 +132,11 @@ function weeklyReportHtml(summary) {
                 <strong>${summary.count}</strong> approved donation${summary.count === 1 ? "" : "s"}
                 ${failedCount ? ` · <strong>${failedCount}</strong> unsuccessful` : ""}
               </p>
-              <p style="margin:18px 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:${MUTED};">
-                Sent automatically every Monday at 08:30 CAT.
-              </p>
+              ${
+                options.automaticNote
+                  ? `<p style="margin:18px 0 8px;font-family:Helvetica,Arial,sans-serif;font-size:14px;color:${MUTED};">${escapeHtml(options.automaticNote)}</p>`
+                  : ""
+              }
             </td>
           </tr>
           <tr>
@@ -102,15 +158,36 @@ function weeklyReportHtml(summary) {
 </html>`;
 }
 
-async function sendWeeklyReportEmail(summary, { to } = {}) {
-  const apiKey = process.env.RESEND_API_KEY;
-  if (!apiKey) {
-    console.warn("[weekly-report] RESEND_API_KEY missing; skipped");
-    return { skipped: true };
-  }
+function weeklyReportHtml(summary) {
+  return periodReportHtml(summary, {
+    period: "week",
+    title: `Week of ${formatRangeLabel(summary.startIso, summary.endIso)}`,
+    eyebrow: "Weekly donations",
+    automaticNote: "Sent automatically every Monday at 08:30 CAT.",
+  });
+}
 
-  const from =
-    process.env.RESEND_FROM || "Mulatiwa Foundation <donations@mulatiwafoundation.org>";
+async function sendPeriodReportEmail(summary, { to, period, title } = {}) {
+  const heading = title || periodTitle(period, summary.startIso, summary.endIso);
+  const totalsLine = Object.entries(summary.totals)
+    .filter(([, value]) => value > 0)
+    .map(([currency, value]) => formatMoney(value, currency))
+    .join(" · ");
+
+  const result = await sendWithResend({
+    to: to || STAFF_TO,
+    subject: `Donations summary: ${totalsLine || "no donations"} (${heading})`,
+    html: periodReportHtml(summary, {
+      period,
+      title: heading,
+      eyebrow: "Donations summary",
+    }),
+  });
+  if (result?.skipped) return { skipped: true, title: heading };
+  return { ok: true, title: heading };
+}
+
+async function sendWeeklyReportEmail(summary, { to } = {}) {
   const start = new Date(summary.startIso).toLocaleDateString("en-ZM", {
     timeZone: "Africa/Lusaka",
     dateStyle: "medium",
@@ -120,23 +197,12 @@ async function sendWeeklyReportEmail(summary, { to } = {}) {
     .map(([currency, value]) => formatMoney(value, currency))
     .join(" · ");
 
-  const response = await fetch("https://api.resend.com/emails", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      from,
-      to: [to || STAFF_TO],
-      subject: `Weekly donations: ${totalsLine || "no donations"} (${start})`,
-      html: weeklyReportHtml(summary),
-    }),
+  const result = await sendWithResend({
+    to: to || STAFF_TO,
+    subject: `Weekly donations: ${totalsLine || "no donations"} (${start})`,
+    html: weeklyReportHtml(summary),
   });
-
-  if (!response.ok) {
-    throw new Error(`Weekly report email failed (${response.status}): ${await response.text()}`);
-  }
+  if (result?.skipped) return { skipped: true };
   return { ok: true };
 }
 
@@ -150,6 +216,16 @@ async function buildWeeklySummary(now = new Date()) {
   return { ...summary, failedCount };
 }
 
+async function buildPeriodSummary({ from, to }) {
+  const start = new Date(from);
+  const end = new Date(to);
+  const donations = await searchTransactions({ from: start, to: end });
+  return summarizeDonations(donations, {
+    startIso: start.toISOString(),
+    endIso: end.toISOString(),
+  });
+}
+
 async function runWeeklyReport(options = {}) {
   const summary = await buildWeeklySummary(options.now || new Date());
   await sendWeeklyReportEmail(summary, { to: options.to });
@@ -160,6 +236,11 @@ async function runWeeklyReport(options = {}) {
 module.exports = {
   runWeeklyReport,
   sendWeeklyReportEmail,
+  sendPeriodReportEmail,
   buildWeeklySummary,
+  buildPeriodSummary,
+  summarizeDonations,
   weeklyReportHtml,
+  periodReportHtml,
+  periodTitle,
 };

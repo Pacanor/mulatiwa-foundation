@@ -381,9 +381,9 @@ function renderRows(rows) {
 }
 
 function resolveRange({ periodInput, fromInput, toInput }) {
-  const period = PRESETS.includes(periodInput) ? periodInput : "month";
+  const period = PRESETS.includes(periodInput) ? periodInput : "week";
   if (period === "custom") {
-    const fallback = rangeForPreset("month");
+    const fallback = rangeForPreset("week");
     const fromValue = fromInput || fallback.fromValue;
     const toValue = toInput || fallback.toValue;
     const from = startOfDayUtc(parseDay(fromValue, fallback.from));
@@ -588,14 +588,24 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     .pager-page { min-width: 4.5rem; text-align: center; font-size: 13px; font-weight: 700; color: var(--navy); }
     .footnote { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
     .modal-backdrop {
-      position: fixed; inset: 0; display: none; place-items: center; padding: 24px;
+      position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
       background: rgba(12, 28, 48, 0.52); backdrop-filter: blur(4px); z-index: 40;
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transition: opacity 240ms ease, visibility 0ms linear 240ms;
     }
-    .modal-backdrop.is-open { display: grid; }
+    .modal-backdrop.is-open {
+      opacity: 1; visibility: visible; pointer-events: auto;
+      transition: opacity 240ms ease, visibility 0ms linear 0ms;
+    }
     .modal {
-      width: min(720px, 100%); max-height: min(86vh, 900px); overflow: auto;
+      width: min(640px, 100%); max-height: min(86vh, 820px); overflow: auto;
       border-radius: 24px; background: var(--paper); border: 1px solid var(--line);
       box-shadow: 0 28px 70px rgba(12, 28, 48, 0.28);
+      opacity: 0; transform: translateY(18px) scale(0.97);
+      transition: opacity 260ms ease, transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+    }
+    .modal-backdrop.is-open .modal {
+      opacity: 1; transform: none;
     }
     .modal-header {
       display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
@@ -609,7 +619,12 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       border: 0; background: rgba(18, 58, 109, 0.06); color: var(--navy); width: 40px; height: 40px;
       border-radius: 999px; font: inherit; font-size: 22px; line-height: 1; cursor: pointer;
     }
-    .modal-body { padding: 18px 24px 26px; }
+    .modal-body {
+      padding: 18px 24px 26px;
+      opacity: 1;
+      transition: opacity 200ms ease;
+    }
+    .modal-body.is-swapping { opacity: 0; }
     .detail-grid {
       display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0 0 18px;
     }
@@ -622,20 +637,52 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
     }
     .detail-item strong { color: var(--ink); font-size: 14px; font-weight: 700; word-break: break-word; }
-    .detail-section { margin: 0 0 18px; }
+    .detail-item strong.tone-ok { color: var(--ok); }
+    .detail-item strong.tone-bad { color: var(--fail); }
+    .detail-item strong.tone-warn { color: #9a6700; }
+    .detail-section { margin: 0 0 4px; }
     .detail-section h3 {
       margin: 0 0 10px; color: var(--navy); font-size: 12px; font-weight: 800;
       letter-spacing: 0.12em; text-transform: uppercase;
     }
-    .detail-list { margin: 0; padding: 0; list-style: none; }
-    .detail-list li {
-      display: flex; justify-content: space-between; gap: 16px; padding: 10px 0;
-      border-bottom: 1px solid rgba(18, 58, 109, 0.08); font-size: 14px;
-    }
-    .detail-list li:last-child { border-bottom: 0; }
-    .detail-list .muted { color: var(--muted); }
     .modal-loading, .modal-error { color: var(--muted); font-size: 14px; padding: 12px 0; }
     .modal-error { color: var(--fail); }
+    .email-form { display: grid; gap: 14px; }
+    .email-form p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+    .email-form label {
+      display: grid; gap: 8px; color: var(--navy); font-size: 12px; font-weight: 800;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    .email-form input[type="email"] {
+      min-height: 48px; padding: 0 14px; border-radius: 14px; border: 1px solid rgba(18, 58, 109, 0.18);
+      background: #fff; color: var(--ink); font: inherit; font-size: 15px; font-weight: 600;
+    }
+    .email-form input[type="email"]:focus {
+      outline: 2px solid rgba(27, 94, 168, 0.28); outline-offset: 1px;
+    }
+    .email-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+    .email-actions .action-btn { min-height: 44px; }
+    .email-actions .action-btn:disabled { opacity: 0.6; cursor: wait; }
+    .toast {
+      position: fixed; right: 24px; bottom: 24px; z-index: 50;
+      max-width: min(420px, calc(100vw - 32px));
+      padding: 14px 18px; border-radius: 16px;
+      background: var(--navy); color: #fff;
+      box-shadow: 0 18px 40px rgba(12, 28, 48, 0.28);
+      font-size: 14px; font-weight: 600; line-height: 1.45;
+      opacity: 0; transform: translateY(12px) scale(0.98);
+      visibility: hidden; pointer-events: none;
+      transition: opacity 240ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0ms linear 280ms;
+    }
+    .toast.is-open {
+      opacity: 1; transform: none; visibility: visible; pointer-events: auto;
+      transition: opacity 240ms ease, transform 280ms cubic-bezier(0.22, 1, 0.36, 1), visibility 0ms linear 0ms;
+    }
+    .toast.is-error { background: var(--fail); }
+    @media (prefers-reduced-motion: reduce) {
+      .modal-backdrop, .modal-backdrop.is-open, .modal, .modal-body, .toast, .toast.is-open { transition: none; }
+      .modal, .toast { transform: none; }
+    }
     @media (max-width: 820px) {
       .stats { grid-template-columns: 1fr; }
       .stat-total .totals-row { flex-wrap: wrap; white-space: normal; }
@@ -681,10 +728,9 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         </div>
         <div class="actions">
           <a class="action-btn" href="${exportHref}">Export CSV</a>
-          <button type="button" class="action-btn primary" id="weekly-preview-btn">Email last week’s summary</button>
+          <button type="button" class="action-btn primary" id="email-summary-btn">Email a summary</button>
         </div>
       </div>
-      <p class="status-line" id="status-line" aria-live="polite"></p>
 
       <form id="period-form" method="get" action="/internal/giving">
         <input type="hidden" name="t" value="${escapeHtml(nextToken)}" />
@@ -718,7 +764,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
           <button type="button" class="pager-btn" id="pager-next" aria-label="Next page">Next</button>
         </div>
       </div>
-      <p class="footnote">Data is loaded live from Cybersource. Link access expires after about 7 days — open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
+      <p class="footnote">Data is loaded live from Cybersource. Link access expires after about 7 days, so open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
     </section>
   </div>
   <div class="modal-backdrop" id="txn-modal" aria-hidden="true">
@@ -733,6 +779,31 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       <div class="modal-body" id="txn-modal-body"></div>
     </div>
   </div>
+  <div class="modal-backdrop" id="email-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="email-modal-title">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow" style="margin:0">Staff email</p>
+          <h2 id="email-modal-title">Email a summary</h2>
+        </div>
+        <button type="button" class="modal-close" id="email-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body">
+        <form class="email-form" id="email-summary-form">
+          <label>
+            Email address
+            <input type="email" id="email-summary-input" name="email" autocomplete="email" required placeholder="name@example.com" />
+          </label>
+          <p class="modal-error" id="email-summary-error" hidden></p>
+          <div class="email-actions">
+            <button type="submit" class="action-btn primary" id="email-summary-send">Send</button>
+            <button type="button" class="action-btn" id="email-summary-cancel">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script>
     (function () {
       var form = document.getElementById("period-form");
@@ -740,9 +811,18 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       var custom = document.getElementById("custom-dates");
       var fromInput = document.getElementById("from-input");
       var toInput = document.getElementById("to-input");
-      var statusLine = document.getElementById("status-line");
-      var weeklyBtn = document.getElementById("weekly-preview-btn");
+      var emailBtn = document.getElementById("email-summary-btn");
+      var emailModal = document.getElementById("email-modal");
+      var emailClose = document.getElementById("email-modal-close");
+      var emailCancel = document.getElementById("email-summary-cancel");
+      var emailForm = document.getElementById("email-summary-form");
+      var emailInput = document.getElementById("email-summary-input");
+      var emailError = document.getElementById("email-summary-error");
+      var emailSend = document.getElementById("email-summary-send");
+      var toast = document.getElementById("toast");
+      var toastTimer = null;
       var token = ${JSON.stringify(nextToken)};
+      var currentPeriod = ${JSON.stringify(period)};
       var pageSize = ${pageSize};
       var totalRows = ${totalRows};
       var currentPage = 1;
@@ -817,33 +897,94 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       fromInput.addEventListener("change", maybeSubmitCustom);
       toInput.addEventListener("change", maybeSubmitCustom);
 
-      weeklyBtn.addEventListener("click", async function () {
-        weeklyBtn.disabled = true;
-        statusLine.textContent = "Sending last week’s summary…";
-        try {
-          var res = await fetch("/internal/giving/weekly-preview", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ t: token, email: "papiasb@gmail.com" }),
-          });
-          var payload = await res.json().catch(function () { return {}; });
-          if (!res.ok) throw new Error(payload.error || "Could not send preview");
-          var totals = payload.totals || {};
-          var totalBits = Object.keys(totals).filter(function (key) {
-            return Number(totals[key]) > 0;
-          }).map(function (key) {
-            return key + " " + totals[key];
-          }).join(", ");
-          statusLine.textContent =
-            "Last week’s summary sent to " + (payload.sent_to || "your inbox") +
-            " (" + (payload.approved || 0) + " approved" +
-            (totalBits ? ": " + totalBits : "") + ").";
-        } catch (error) {
-          statusLine.textContent = error.message || "Could not send weekly summary.";
-        } finally {
-          weeklyBtn.disabled = false;
+      function showToast(message, isError) {
+        if (!toast) return;
+        toast.textContent = message;
+        toast.classList.toggle("is-error", Boolean(isError));
+        toast.classList.add("is-open");
+        if (toastTimer) window.clearTimeout(toastTimer);
+        toastTimer = window.setTimeout(function () {
+          toast.classList.remove("is-open");
+        }, 4200);
+      }
+
+      function openEmailModal() {
+        if (!emailModal) return;
+        if (emailError) {
+          emailError.hidden = true;
+          emailError.textContent = "";
         }
-      });
+        emailModal.classList.add("is-open");
+        emailModal.setAttribute("aria-hidden", "false");
+        window.setTimeout(function () {
+          if (emailInput) emailInput.focus();
+        }, 220);
+      }
+
+      function closeEmailModal() {
+        if (!emailModal) return;
+        emailModal.classList.remove("is-open");
+        emailModal.setAttribute("aria-hidden", "true");
+      }
+
+      if (emailBtn) emailBtn.addEventListener("click", openEmailModal);
+      if (emailClose) emailClose.addEventListener("click", closeEmailModal);
+      if (emailCancel) emailCancel.addEventListener("click", closeEmailModal);
+      if (emailModal) {
+        emailModal.addEventListener("click", function (event) {
+          if (event.target === emailModal) closeEmailModal();
+        });
+      }
+
+      if (emailForm) {
+        emailForm.addEventListener("submit", async function (event) {
+          event.preventDefault();
+          var address = emailInput ? String(emailInput.value || "").trim() : "";
+          if (!address) {
+            if (emailError) {
+              emailError.hidden = false;
+              emailError.textContent = "Enter an email address.";
+            }
+            return;
+          }
+          if (emailSend) {
+            emailSend.disabled = true;
+            emailSend.textContent = "Sending…";
+          }
+          if (emailError) {
+            emailError.hidden = true;
+            emailError.textContent = "";
+          }
+          try {
+            var res = await fetch("/internal/giving/email-summary", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                t: token,
+                email: address,
+                period: periodInput.value || currentPeriod,
+                from: fromInput && fromInput.value,
+                to: toInput && toInput.value,
+              }),
+            });
+            var payload = await res.json().catch(function () { return {}; });
+            if (!res.ok) throw new Error(payload.error || "Could not send summary");
+            closeEmailModal();
+            showToast("Summary sent to " + (payload.sent_to || address) + ".");
+            if (emailInput) emailInput.value = "";
+          } catch (error) {
+            if (emailError) {
+              emailError.hidden = false;
+              emailError.textContent = error.message || "Could not send summary.";
+            }
+          } finally {
+            if (emailSend) {
+              emailSend.disabled = false;
+              emailSend.textContent = "Send";
+            }
+          }
+        });
+      }
 
       var modal = document.getElementById("txn-modal");
       var modalBody = document.getElementById("txn-modal-body");
@@ -863,8 +1004,55 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         return currency === "ZMW" ? ("K" + formatted) : ("$" + formatted);
       }
 
-      function field(label, value) {
-        return '<div class="detail-item"><span>' + label + '</span><strong>' + (value || "—") + '</strong></div>';
+      function toneClass(kind, value) {
+        var text = String(value == null ? "" : value).trim();
+        if (!text || text === "—") return "";
+        var upper = text.toUpperCase();
+        if (kind === "status") {
+          if (upper === "APPROVED") return "tone-ok";
+          if (upper === "DECLINED" || upper === "FAILED") return "tone-bad";
+          return "tone-warn";
+        }
+        if (kind === "risk") {
+          if (upper === "ACCEPT" || upper === "ACCEPTED") return "tone-ok";
+          if (upper === "REJECT" || upper === "REJECTED" || upper === "DECLINE" || upper === "DECLINED") {
+            return "tone-bad";
+          }
+          if (upper === "REVIEW" || upper === "CHALLENGE") return "tone-warn";
+          return "";
+        }
+        if (kind === "reason") {
+          if (upper === "100") return "tone-ok";
+          if (/^(481|203|102|200|220|230|231|232|233|234|236|240|250)/.test(upper)) return "tone-bad";
+          return "tone-warn";
+        }
+        if (kind === "response") {
+          if (upper === "00" || upper === "0" || upper === "000") return "tone-ok";
+          return "tone-bad";
+        }
+        return "";
+      }
+
+      function field(label, value, tone) {
+        var shown = value || "—";
+        var klass = tone ? toneClass(tone, shown) : "";
+        return '<div class="detail-item"><span>' + label + '</span><strong' +
+          (klass ? ' class="' + klass + '"' : "") + ">" + shown + "</strong></div>";
+      }
+
+      var bodySwapTimer = null;
+      var bodySwapGen = 0;
+
+      function setModalBody(html) {
+        if (!modalBody) return;
+        var gen = ++bodySwapGen;
+        modalBody.classList.add("is-swapping");
+        if (bodySwapTimer) window.clearTimeout(bodySwapTimer);
+        bodySwapTimer = window.setTimeout(function () {
+          if (gen !== bodySwapGen) return;
+          modalBody.innerHTML = html;
+          modalBody.classList.remove("is-swapping");
+        }, 160);
       }
 
       function openTransaction(id) {
@@ -872,7 +1060,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         modal.classList.add("is-open");
         modal.setAttribute("aria-hidden", "false");
         modalTitle.textContent = "Loading…";
-        modalBody.innerHTML = '<p class="modal-loading">Fetching Cybersource details…</p>';
+        setModalBody('<p class="modal-loading">Fetching payment details…</p>');
         fetch("/internal/giving/transaction/" + encodeURIComponent(id) + "?t=" + encodeURIComponent(token))
           .then(function (res) { return res.json().then(function (payload) { return { ok: res.ok, payload: payload }; }); })
           .then(function (result) {
@@ -882,49 +1070,36 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
             var when = tx.submit_time ? new Date(tx.submit_time).toLocaleString("en-ZM", {
               timeZone: "Africa/Lusaka", dateStyle: "full", timeStyle: "short"
             }) : "—";
-            var riskRules = (tx.decision && tx.decision.risk_rules || []).map(function (rule) {
-              return '<li><span>' + (rule.name || "Rule") + '</span><span class="muted">' + (rule.decision || "—") + '</span></li>';
-            }).join("") || '<li><span>No risk rules returned</span><span class="muted">—</span></li>';
-            var apps = (tx.applications || []).map(function (app) {
-              return '<li><span>' + (app.name || "service") + '</span><span class="muted">' +
-                [app.status, app.reason_code, app.message].filter(Boolean).join(" · ") + '</span></li>';
-            }).join("") || '<li><span>No services returned</span><span class="muted">—</span></li>';
-            modalBody.innerHTML =
+            var decisionMessage = (tx.decision && tx.decision.message) || tx.error_message || "";
+            if (/processed successfully/i.test(decisionMessage) && tx.status !== "approved") {
+              decisionMessage = tx.error_message || decisionMessage;
+            }
+            setModalBody(
               '<div class="detail-grid">' +
                 field("When (CAT)", when) +
-                field("Status", tx.status) +
+                field("Status", tx.status, "status") +
                 field("Amount", money(tx.amount, tx.currency)) +
                 field("Request ID", tx.id || tx.reference) +
                 field("Client reference", tx.client_reference) +
                 field("Card", tx.card || (tx.payment && tx.payment.card)) +
-              '</div>' +
+              "</div>" +
               '<div class="detail-section"><h3>Donor</h3><div class="detail-grid">' +
                 field("Name", tx.bill_to && tx.bill_to.name) +
                 field("Email", tx.bill_to && tx.bill_to.email) +
                 field("Country", tx.bill_to && tx.bill_to.country) +
                 field("Postal code", tx.bill_to && tx.bill_to.postal_code) +
-              '</div></div>' +
-              '<div class="detail-section"><h3>Processor</h3><div class="detail-grid">' +
-                field("Processor", tx.processor && tx.processor.name) +
-                field("Approval code", tx.processor && tx.processor.approval_code) +
-                field("Response code", tx.processor && tx.processor.response_code) +
-                field("Retrieval ref", tx.processor && tx.processor.retrieval_reference) +
-                field("AVS", tx.processor && tx.processor.avs) +
-                field("CVV result", tx.processor && tx.processor.cvv) +
-              '</div></div>' +
+              "</div></div>" +
               '<div class="detail-section"><h3>What happened</h3><div class="detail-grid">' +
-                field("Decision message", tx.decision && tx.decision.message || tx.error_message) +
-                field("Reason code", tx.decision && tx.decision.overall_reason || tx.reason_code) +
-                field("Risk profile", tx.decision && tx.decision.risk_profile) +
-                field("Risk decision", tx.decision && tx.decision.risk_decision) +
-                field("Authorization", tx.services && tx.services.authorization && ([tx.services.authorization.status, tx.services.authorization.message].filter(Boolean).join(" · "))) +
-                field("Capture", tx.services && tx.services.capture && ([tx.services.capture.status, tx.services.capture.message].filter(Boolean).join(" · "))) +
-              '</div><ul class="detail-list">' + riskRules + '</ul></div>' +
-              '<div class="detail-section"><h3>Cybersource services</h3><ul class="detail-list">' + apps + '</ul></div>';
+                field("Decision message", decisionMessage) +
+                field("Reason code", (tx.decision && tx.decision.overall_reason) || tx.reason_code, "reason") +
+                field("Risk decision", tx.decision && tx.decision.risk_decision, "risk") +
+                field("Response code", tx.processor && tx.processor.response_code, "response") +
+              "</div></div>"
+            );
           })
           .catch(function (error) {
             modalTitle.textContent = "Details unavailable";
-            modalBody.innerHTML = '<p class="modal-error">' + (error.message || "Could not load details.") + '</p>';
+            setModalBody('<p class="modal-error">' + (error.message || "Could not load details.") + "</p>");
           });
       }
 
@@ -949,7 +1124,9 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         });
       }
       document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape") closeModal();
+        if (event.key !== "Escape") return;
+        closeModal();
+        closeEmailModal();
       });
     })();
   </script>

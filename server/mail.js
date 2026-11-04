@@ -39,29 +39,47 @@ function friendlyFailureReason(raw) {
     .replace(/\s+/g, " ")
     .trim();
   if (!text) {
-    return "Your bank or card provider could not complete the payment.";
+    return "We couldn't complete this gift. Try again, or write to us if you need help.";
+  }
+  if (
+    /decision is reject|decision manager|non[- ]?3ds|risk rule|reason 481|\b481\b/i.test(
+      text,
+    )
+  ) {
+    return "Our payment security check couldn't approve this card. Try a different card, or check the details and try again.";
   }
   if (/insufficient|funds|balance/i.test(text)) {
-    return "Your bank reported insufficient funds for this gift.";
+    return "Your bank said there weren't enough funds for this gift. Try another card, or try again later.";
   }
   if (/expired/i.test(text)) {
-    return "The card appears to be expired.";
+    return "This card looks expired. Check the expiry date, or try a different card.";
   }
-  if (/cvv|cvc|security code/i.test(text)) {
-    return "The security code did not match what your bank expected.";
+  if (/cvv|cvc|security code|card verification/i.test(text)) {
+    return "The security code didn't match. Check the digits on the back of your card and try again.";
   }
-  if (/declin|denied|not authorized|rejected|do not honor/i.test(text)) {
-    return "Your bank declined this payment.";
+  if (/invalid account|invalid card|lost card|stolen|pick up/i.test(text)) {
+    return "Your bank couldn't use this card. Try a different card, or contact your bank for help.";
+  }
+  if (/do not honor|not authorized|denied|issuer|declin|rejected/i.test(text)) {
+    return "Your bank declined this payment. Try another card, or ask your bank to allow the charge.";
   }
   if (/fraud|risk|blocked/i.test(text)) {
-    return "Your bank blocked this payment for security reasons.";
+    return "Your bank blocked this payment for security reasons. Try another card, or contact your bank.";
   }
-  if (/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout/i.test(text)) {
-    return "Your bank or card provider could not complete the payment.";
+  if (/discount|0\.00|not collected|cancelled|canceled/i.test(text)) {
+    return "The payment didn't go through for the amount you chose. Please try again.";
   }
-  // Keep provider wording when it already reads naturally.
-  if (text.length <= 160) return text.replace(/\.$/, "") + ".";
-  return "Your bank or card provider could not complete the payment.";
+  if (
+    /failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout/i.test(
+      text,
+    )
+  ) {
+    return "We couldn't finish the payment just now. Wait a moment and try again, or write to us if it keeps happening.";
+  }
+  if (text.length <= 140 && !/ics_|rFlag|reason code/i.test(text)) {
+    return `${text.replace(/\.$/, "")}. Try again, or write to us if you need help.`;
+  }
+  return "We couldn't complete this gift. Try another card, or write to us if you need help.";
 }
 
 async function sendWithResend({ to, subject, html }) {
@@ -408,6 +426,7 @@ async function sendFailedDonationEmail(donation) {
 module.exports = {
   sendDonationEmails,
   sendFailedDonationEmail,
+  sendWithResend,
   donorThankYouHtml,
   donorFailedHtml,
   staffNotifyHtml,

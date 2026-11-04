@@ -1546,23 +1546,59 @@ h2 {
   display: block;
 }
 
+.donate-copy {
+  max-width: 48ch;
+}
+
 .donate-intro {
-  max-width: 34ch;
+  max-width: none;
   color: rgba(255, 255, 255, 0.82);
   font-size: clamp(1.05rem, 1.5vw, 1.22rem);
   line-height: 1.65;
 }
 
+.donate-aside {
+  display: grid;
+  gap: 16px;
+  align-content: start;
+}
+
 .donate-note {
-  max-width: 38ch;
-  margin: 28px 0 0;
+  margin: 0;
+  padding: 0 8px;
   color: rgba(255, 255, 255, 0.62);
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 0.92rem;
+  line-height: 1.55;
+  text-align: center;
+}
+
+.donate-impact {
+  max-width: none;
+  margin: 32px 0 0;
+}
+
+.donate-impact img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 5 / 4;
+  object-fit: cover;
+  object-position: center 18%;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 22px 48px rgba(6, 24, 46, 0.28);
+}
+
+.donate-impact figcaption {
+  margin-top: 14px;
+  max-width: none;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.98rem;
+  line-height: 1.55;
 }
 
 .donate-panel {
-  padding: 28px;
+  padding: 28px 12px;
   color: var(--ink);
   background:
     linear-gradient(180deg, rgba(255, 253, 248, 0.98), rgba(246, 243, 234, 0.96)),
@@ -1579,6 +1615,8 @@ h2 {
 
 .donate-stage {
   position: relative;
+  /* Horizontal padding keeps button pill-glow inside the overflow clip. */
+  padding: 8px 16px;
   overflow: hidden;
   transition: height 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -1638,6 +1676,8 @@ h2 {
   width: 100%;
 }
 
+.uc-payment-host.is-collapsed,
+.uc-payment-host:empty,
 .uc-payment-screen:empty {
   display: none;
 }
@@ -2055,9 +2095,13 @@ h2 {
     gap: 36px;
   }
 
-  .donate-intro,
-  .donate-note {
+  .donate-copy {
     max-width: none;
+  }
+
+  .donate-note {
+    text-align: left;
+    padding: 0 4px;
   }
 }
 
@@ -2066,9 +2110,23 @@ h2 {
     padding: 120px 0 64px;
   }
 
+  .donate-impact {
+    max-width: none;
+    margin-top: 28px;
+  }
+
+  .donate-impact img {
+    aspect-ratio: 16 / 10;
+    border-radius: 18px;
+  }
+
   .donate-panel {
-    padding: 22px;
+    padding: 22px 8px;
     border-radius: 22px;
+  }
+
+  .donate-stage {
+    padding: 6px 14px;
   }
 
   .amount-option {

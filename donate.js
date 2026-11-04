@@ -39,8 +39,11 @@
   let stepResizeObserver = null;
   const stage = root.querySelector(".donate-stage") || root;
   const walletsEl = root.querySelector("[data-wallets]");
+  const paymentHost = document.getElementById("ucPaymentContainer");
+  const paymentScreen = document.getElementById("ucPaymentScreen");
   const steps = [amountStep, checkoutStep, thanksStep, declinedStep].filter(Boolean);
   const HEIGHT_BUFFER = 16;
+  let ucLayoutObserver = null;
 
   const formatAmount = (value, code = currency) => {
     const number = Number(value);
@@ -72,8 +75,49 @@
     const active = steps.find((step) => step.classList.contains("is-active"));
     if (!active || !stage) return;
     // Measure the live content, then add a small comfort buffer — no oversized min-heights.
-    const nextHeight = Math.ceil(active.getBoundingClientRect().height + HEIGHT_BUFFER);
+    // Include stage padding so button glow room does not clip step content under border-box.
+    const styles = window.getComputedStyle(stage);
+    const padY =
+      (Number.parseFloat(styles.paddingTop) || 0) +
+      (Number.parseFloat(styles.paddingBottom) || 0);
+    const nextHeight = Math.ceil(
+      active.getBoundingClientRect().height + padY + HEIGHT_BUFFER,
+    );
     stage.style.height = `${Math.max(nextHeight, 1)}px`;
+  };
+
+  const clearStatus = () => {
+    if (!statusEl) return;
+    statusEl.hidden = true;
+    statusEl.textContent = "";
+  };
+
+  const syncUcLayout = () => {
+    if (!paymentHost || !paymentScreen) return;
+    const screenReady = paymentScreen.childElementCount > 0;
+    const hostReady = paymentHost.childElementCount > 0;
+    // Once the card form is open, collapse leftover selection chrome so it
+    // does not leave a tall blank band above checkout.
+    paymentHost.classList.toggle("is-collapsed", screenReady);
+    const text = statusEl?.textContent || "";
+    if (
+      (screenReady || hostReady) &&
+      (!text || /payment method|loading secure|choose a payment/i.test(text))
+    ) {
+      clearStatus();
+    }
+    measureActiveStepHeight();
+  };
+
+  const watchUcLayout = () => {
+    if (typeof MutationObserver !== "function" || !paymentHost || !paymentScreen) return;
+    if (ucLayoutObserver) ucLayoutObserver.disconnect();
+    ucLayoutObserver = new MutationObserver(() => {
+      syncUcLayout();
+    });
+    ucLayoutObserver.observe(paymentHost, { childList: true, subtree: true });
+    ucLayoutObserver.observe(paymentScreen, { childList: true, subtree: true });
+    syncUcLayout();
   };
 
   const watchActiveStepSize = () => {
@@ -135,18 +179,44 @@
       .replace(/\s+/g, " ")
       .trim();
     if (!text) {
-      return "The payment could not be completed. Try another card, or write to us if you need help.";
+      return "We couldn't complete this gift. Try again, or write to us if you need help.";
     }
-    if (/decision is reject|non 3ds|reason 481|481/i.test(text)) {
-      return "The payment was authorised by the card network, but Cybersource Decision Manager rejected it (Non‑3DS / reason 481). Nothing was settled. Try another card, or ask Zanaco to adjust the sandbox Decision Manager rule.";
+    if (
+      /decision is reject|decision manager|non[- ]?3ds|risk rule|reason 481|\b481\b/i.test(
+        text,
+      )
+    ) {
+      return "Our payment security check couldn't approve this card. Try a different card, or check the details and try again.";
     }
-    if (/declin/i.test(text)) {
-      return `The card issuer declined this payment (${text}). Nothing was charged.`;
+    if (/insufficient|funds|balance/i.test(text)) {
+      return "Your bank said there weren't enough funds for this gift. Try another card, or try again later.";
     }
-    if (/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout|autoProcessing/i.test(text)) {
-      return "The payment could not be completed. Try again in a moment, or write to us if you need help.";
+    if (/expired/i.test(text)) {
+      return "This card looks expired. Check the expiry date, or try a different card.";
     }
-    return text;
+    if (/cvv|cvc|security code|card verification/i.test(text)) {
+      return "The security code didn't match. Check the digits on the back of your card and try again.";
+    }
+    if (/invalid account|invalid card|lost card|stolen|pick up/i.test(text)) {
+      return "Your bank couldn't use this card. Try a different card, or contact your bank for help.";
+    }
+    if (/do not honor|not authorized|denied|issuer|declin/i.test(text)) {
+      return "Your bank declined this payment. Try another card, or ask your bank to allow the charge.";
+    }
+    if (/discount|0\.00|not collected|cancelled|canceled/i.test(text)) {
+      return "The payment didn't go through for the amount you chose. Please try again.";
+    }
+    if (
+      /failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout|autoProcessing/i.test(
+        text,
+      )
+    ) {
+      return "We couldn't finish the payment just now. Wait a moment and try again, or write to us if it keeps happening.";
+    }
+    if (text.length <= 140 && !/ics_|rFlag|reason code/i.test(text)) {
+      return `${text.replace(/\.$/, "")}. Try again, or write to us if you need help.`;
+    }
+    return "We couldn't complete this gift. Try another card, or write to us if you need help.";
   };
 
   const showDeclinedResult = (rawMessage) => {
@@ -195,7 +265,7 @@
 
   const updateImpact = () => {
     if (!impactLine) return;
-    impactLine.textContent = "Gifts like this from you will keep us moving.";
+    impactLine.textContent = "Every gift keeps this work moving.";
   };
 
   const renderPresets = () => {
@@ -267,12 +337,13 @@
     });
 
   const clearCheckoutContainers = () => {
-    const host = document.getElementById("ucPaymentContainer");
-    const screen = document.getElementById("ucPaymentScreen");
     const apple = document.getElementById("ucApplePay");
     const google = document.getElementById("ucGooglePay");
-    if (host) host.innerHTML = "";
-    if (screen) screen.innerHTML = "";
+    if (paymentHost) {
+      paymentHost.innerHTML = "";
+      paymentHost.classList.remove("is-collapsed");
+    }
+    if (paymentScreen) paymentScreen.innerHTML = "";
     if (apple) apple.innerHTML = "";
     if (google) google.innerHTML = "";
     if (walletsEl) walletsEl.hidden = true;
@@ -313,7 +384,7 @@
       const slot = document.getElementById(id);
       if (!slot) return;
       try {
-        const button = client.createButton(type, { autoProcessing: true });
+        const button = client.createButton(type, { autoProcessing: false });
         walletButtons.push(button);
         // Resolve only on a completed wallet payment. Mount failures must not
         // reject the card Trigger path racing alongside these promises.
@@ -345,10 +416,7 @@
     showError(checkoutError, "");
     showError(amountError, "");
     resetContinueButton();
-    if (statusEl) {
-      statusEl.hidden = true;
-      statusEl.textContent = "";
-    }
+    clearStatus();
     setStep("amount");
   };
 
@@ -405,9 +473,8 @@
   };
 
   const finalizeCheckoutResult = async (mountResult) => {
-    // autoProcessing: true means mount() already finished UC orchestration.
-    // Calling trigger.complete() throws: "cannot be called when autoProcessing is enabled".
-    // If mount still returns a Flex transient token, /api/donate/complete captures via PTS.
+    // autoProcessing is false so mount() returns a transient token. We never call
+    // checkout.complete() — the server captures via PTS with the selected amount.
     if (isTransientToken(mountResult) && statusEl) {
       statusEl.hidden = false;
       statusEl.textContent = "Confirming your gift with the bank…";
@@ -463,6 +530,7 @@
         statusEl.hidden = false;
         statusEl.textContent = "Loading secure card payment…";
       }
+      watchUcLayout();
       measureActiveStepHeight();
 
       // Embedded in-card checkout (selection + payment screen) with live height resizing.
@@ -470,24 +538,20 @@
       if (generation !== checkoutGeneration) return;
 
       const walletPending = startWalletButtons(activeClient);
+      // Transient token only — server PTS charges the selected amount.
       activeCheckout = await activeClient.createCheckout({
-        autoProcessing: true,
+        autoProcessing: false,
       });
       if (generation !== checkoutGeneration) return;
-
-      if (statusEl) {
-        statusEl.hidden = false;
-        statusEl.textContent = "Choose a payment method below.";
-      }
-      measureActiveStepHeight();
 
       const cardPending = activeCheckout.mount({
         paymentSelection: "#ucPaymentContainer",
         paymentScreen: "#ucPaymentScreen",
       });
-      // After the button list paints, grow the card to fit; form step remasures via ResizeObserver.
-      window.setTimeout(measureActiveStepHeight, 120);
-      window.setTimeout(measureActiveStepHeight, 400);
+      // After the form paints, collapse empty selection chrome and fit the card height.
+      window.setTimeout(syncUcLayout, 120);
+      window.setTimeout(syncUcLayout, 400);
+      window.setTimeout(syncUcLayout, 900);
 
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
@@ -502,7 +566,7 @@
         statusEl.textContent = "Recording your gift…";
       }
 
-      // Server authoritatively captures when UC only returns a Flex transient token.
+      // Server captures via PTS using the session amount (source of truth).
       const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
@@ -521,8 +585,8 @@
       }
 
       showApprovedResult({
-        amount: payload.amount,
-        currency: payload.currency,
+        amount: recorded?.amount || payload.amount,
+        currency: recorded?.currency || payload.currency,
       });
     } catch (error) {
       if (generation !== checkoutGeneration) return;

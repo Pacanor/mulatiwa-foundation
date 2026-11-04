@@ -104,10 +104,30 @@ function relativeRangeQuery(from, to, now = new Date()) {
   return `submitTimeUtc:[NOW/DAY-${daysBack}DAYS TO NOW/DAY+${daysForward}DAYS]`;
 }
 
-function mapOverallStatus(applicationInformation = {}, errorInformation = {}) {
+function mapOverallStatus(
+  applicationInformation = {},
+  errorInformation = {},
+  amountDetails = {},
+) {
+  const appStatus = String(applicationInformation.status || "").toUpperCase();
+  if (appStatus === "CANCELLED" || appStatus === "CANCELED") return "failed";
+
   const flag = String(applicationInformation.rFlag || "").toUpperCase();
   const rCode = String(applicationInformation.rCode ?? "");
   const reason = String(applicationInformation.reasonCode ?? "");
+  const apps = applicationInformation.applications || [];
+  const auth = apps.find((app) => app.name === "ics_auth") || {};
+  const authFlag = String(auth.rFlag || "").toUpperCase();
+  const charged = Number(
+    amountDetails.authorizedAmount ?? amountDetails.totalAmount ?? NaN,
+  );
+
+  // UC completeMandate on this MID has returned reason 100 with a $0
+  // SDISCOUNT auth and cancelled bill — that is not a collected gift.
+  if (Number.isFinite(charged) && charged <= 0) return "failed";
+  if (authFlag === "SDISCOUNT" && (!Number.isFinite(charged) || charged <= 0)) {
+    return "failed";
+  }
 
   if (flag === "SOK" || rCode === "1" || reason === "100") return "approved";
   if (
@@ -123,13 +143,11 @@ function mapOverallStatus(applicationInformation = {}, errorInformation = {}) {
   if (errorInformation?.message) return "failed";
   if (!flag && !rCode && !reason) {
     // Fall back to application outcomes when the summary omits overall flags.
-    const apps = applicationInformation.applications || [];
-    const auth = apps.find((app) => app.name === "ics_auth");
     const decision = apps.find((app) => app.name === "ics_decision");
     if (decision && String(decision.rFlag || "").toUpperCase().includes("REJECT")) {
       return "declined";
     }
-    if (auth && (String(auth.rFlag || "").toUpperCase() === "SOK" || String(auth.rCode) === "1")) {
+    if (auth && (authFlag === "SOK" || String(auth.rCode) === "1")) {
       return "approved";
     }
   }
@@ -138,6 +156,10 @@ function mapOverallStatus(applicationInformation = {}, errorInformation = {}) {
 
 function explainFailure(summary) {
   const apps = summary?.applicationInformation?.applications || [];
+  const amountDetails = summary?.orderInformation?.amountDetails || {};
+  const charged = Number(amountDetails.authorizedAmount ?? amountDetails.totalAmount);
+  const appStatus = String(summary?.applicationInformation?.status || "").toUpperCase();
+  const auth = apps.find((app) => app.name === "ics_auth") || {};
   const decisionMessage = apps.find((app) =>
     String(app.rFlag || "").toUpperCase().includes("REJECT") ||
     String(app.rFlag || "").toUpperCase().includes("DECLINE") ||
@@ -151,7 +173,15 @@ function explainFailure(summary) {
     .filter(Boolean)
     .join(", ");
   const parts = [];
-  if (errorMessage) parts.push(errorMessage);
+  if (appStatus === "CANCELLED" || appStatus === "CANCELED") {
+    parts.push("Capture cancelled");
+  }
+  if (String(auth.rFlag || "").toUpperCase() === "SDISCOUNT" && (!Number.isFinite(charged) || charged <= 0)) {
+    parts.push("Authorised for 0.00 after discount, so the gift was not collected");
+  } else if (Number.isFinite(charged) && charged <= 0) {
+    parts.push("No amount was collected");
+  }
+  if (errorMessage && !/processed successfully/i.test(errorMessage)) parts.push(errorMessage);
   else if (decisionMessage) parts.push(decisionMessage);
   if (riskRules) parts.push(`Risk rule: ${riskRules}`);
   else if (riskDecision && String(riskDecision).toUpperCase() !== "ACCEPT") {
@@ -159,7 +189,7 @@ function explainFailure(summary) {
   }
   const reason = summary?.applicationInformation?.reasonCode;
   if (reason && String(reason) !== "100") parts.push(`Reason ${reason}`);
-  return parts.join(" — ") || "";
+  return parts.join(". ") || "";
 }
 
 function cardLabel(paymentInformation = {}) {
@@ -178,7 +208,11 @@ function cardLabel(paymentInformation = {}) {
 function normalizeSummary(summary) {
   const billTo = summary?.orderInformation?.billTo || {};
   const amountDetails = summary?.orderInformation?.amountDetails || {};
-  const status = mapOverallStatus(summary?.applicationInformation, summary?.errorInformation);
+  const status = mapOverallStatus(
+    summary?.applicationInformation,
+    summary?.errorInformation,
+    amountDetails,
+  );
   const first = billTo.firstName || "";
   const last = billTo.lastName || "";
   const donorName = [first, last].filter(Boolean).join(" ").trim();

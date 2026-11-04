@@ -99,9 +99,11 @@ async function createCaptureContext({
       showConfirmationStep: false,
       showAcceptedNetworkIcons: true,
     },
-    completeMandate: {
-      type: "CAPTURE",
-    },
+    // Do not send completeMandate. Business Center may still inject one when
+    // "Payment Processing" is enabled; the client forces autoProcessing:false
+    // and we capture via PTS with the explicit gift amount. UC browser capture
+    // on this MID previously settled discounted $0 auths (SDISCOUNT + cancelled
+    // bill) while the UI still showed the selected gift.
     appearance: {
       theme: "LIGHT",
       variables: {
@@ -117,11 +119,24 @@ async function createCaptureContext({
       },
     },
     data: {
+      clientReferenceInformation: {
+        code: `MF-${Date.now()}`,
+      },
       orderInformation: {
         amountDetails: {
-          totalAmount: amount,
+          totalAmount: String(amount),
           currency,
         },
+        lineItems: [
+          {
+            unitPrice: String(amount),
+            quantity: 1,
+            productCode: "donation",
+            productName: "Donation",
+            productSku: "DONATE",
+            productDescription: "Mulatiwa Foundation gift",
+          },
+        ],
       },
     },
   };

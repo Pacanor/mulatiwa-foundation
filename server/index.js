@@ -29,7 +29,7 @@ const {
   buildExportCsv,
   exportFilename,
 } = require("./report-page");
-const { runWeeklyReport } = require("./weekly-report");
+const { runWeeklyReport, buildPeriodSummary, sendPeriodReportEmail, periodTitle } = require("./weekly-report");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
@@ -278,6 +278,8 @@ app.post("/api/donate/complete", async (req, res) => {
       donor_email_sent: Boolean(donation.email) && !isSeed && finalStatus === "approved",
       reference: donation.reference,
       status: finalStatus,
+      amount: donation.amount,
+      currency: donation.currency,
       error_message: donation.error_message || "",
     });
   } catch (error) {
@@ -388,6 +390,44 @@ app.post("/internal/giving/weekly-preview", async (req, res) => {
   } catch (error) {
     console.error("[weekly-preview]", error.message);
     return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post("/internal/giving/email-summary", async (req, res) => {
+  const token = String(req.body?.t || req.query.t || "");
+  if (!verifyReportToken(token)) {
+    return res.status(403).json({ error: "Invalid or expired report link." });
+  }
+
+  const to = String(req.body?.email || "").trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return res.status(400).json({ error: "Enter a valid email address." });
+  }
+
+  try {
+    const { period, from, to: rangeTo } = resolveRange({
+      periodInput: req.body?.period,
+      fromInput: req.body?.from,
+      toInput: req.body?.to,
+    });
+    const summary = await buildPeriodSummary({ from, to: rangeTo });
+    const title = periodTitle(period, summary.startIso, summary.endIso);
+    const sent = await sendPeriodReportEmail(summary, { to, period, title });
+    if (sent?.skipped) {
+      return res.status(503).json({ error: "Email sending is not configured right now." });
+    }
+    return res.json({
+      ok: true,
+      sent_to: to,
+      period,
+      title,
+      approved: summary.count,
+      unsuccessful: summary.failedCount,
+      totals: summary.totals,
+    });
+  } catch (error) {
+    console.error("[email-summary]", error.message);
+    return res.status(500).json({ error: error.message || "Could not send summary." });
   }
 });
 
