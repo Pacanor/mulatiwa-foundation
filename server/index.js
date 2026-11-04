@@ -10,11 +10,8 @@ const { enrichDonation } = require("./donations");
 const {
   recordDonation,
   ledgerReady,
-  readDonations,
-  readLocalDonations,
-  CSV_LEDGER,
-  DATA_DIR,
-  SHEET_ID,
+  getTransaction,
+  searchTransactions,
 } = require("./ledger");
 const {
   sendDonationEmails,
@@ -28,6 +25,7 @@ const {
   renderReportPage,
   resolveRange,
   filterDonations,
+  previousComparableRange,
   buildExportCsv,
   exportFilename,
 } = require("./report-page");
@@ -154,13 +152,10 @@ app.use(express.json({ limit: "32kb" }));
 app.get("/api/health", async (_req, res) => {
   let donationCount = 0;
   try {
-    donationCount = (await readDonations()).length;
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    donationCount = (await searchTransactions({ from: since, to: new Date() })).length;
   } catch {
-    try {
-      donationCount = readLocalDonations().length;
-    } catch {
-      donationCount = 0;
-    }
+    donationCount = 0;
   }
   res.json({
     status: "ok",
@@ -170,9 +165,7 @@ app.get("/api/health", async (_req, res) => {
     ),
     mail_ready: Boolean(process.env.RESEND_API_KEY),
     ledger_ready: ledgerReady(),
-    ledger_sheet: Boolean(process.env.DONATION_LEDGER_WEBHOOK_URL),
-    ledger_dir: DATA_DIR,
-    google_sheet_id: SHEET_ID,
+    ledger_source: "cybersource",
     donation_count: donationCount,
   });
 });
@@ -294,6 +287,18 @@ app.post("/api/donate/complete", async (req, res) => {
   }
 });
 
+async function loadDonationsForReport(req) {
+  const { period, from, to } = resolveRange({
+    periodInput: req.query.period,
+    fromInput: req.query.from,
+    toInput: req.query.to,
+  });
+  const prev = previousComparableRange(period, from, to);
+  const rangeStart = prev.from < from ? prev.from : from;
+  const donations = await searchTransactions({ from: rangeStart, to });
+  return { period, from, to, donations };
+}
+
 // Obscure staff donations log — requires signed ?t= token from donation emails.
 app.get("/internal/giving", async (req, res) => {
   const token = String(req.query.t || "");
@@ -302,7 +307,7 @@ app.get("/internal/giving", async (req, res) => {
   }
 
   try {
-    const donations = await readDonations();
+    const { donations } = await loadDonationsForReport(req);
     res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     res.set("Cache-Control", "no-store");
     res.type("html").send(
@@ -315,7 +320,7 @@ app.get("/internal/giving", async (req, res) => {
       }),
     );
   } catch (error) {
-    console.error("[giving]", error.message);
+    console.error("[giving]", error.message, error.details || "");
     return res.status(500).type("text").send("Could not load donations log.");
   }
 });
@@ -327,8 +332,8 @@ app.get("/internal/giving.csv", async (req, res) => {
   }
 
   try {
-    const donations = await readDonations();
-    const { period, from, to, fromValue, toValue } = resolveRange({
+    const { period, from, to, donations } = await loadDonationsForReport(req);
+    const { fromValue, toValue } = resolveRange({
       periodInput: req.query.period,
       fromInput: req.query.from,
       toInput: req.query.to,
@@ -342,6 +347,25 @@ app.get("/internal/giving.csv", async (req, res) => {
   } catch (error) {
     console.error("[giving.csv]", error.message);
     return res.status(500).type("text").send("Could not export donations.");
+  }
+});
+
+app.get("/internal/giving/transaction/:id", async (req, res) => {
+  const token = String(req.query.t || "");
+  if (!verifyReportToken(token)) {
+    return res.status(403).json({ error: "Invalid or expired report link." });
+  }
+
+  try {
+    const detail = await getTransaction(String(req.params.id || "").trim());
+    res.set("Cache-Control", "no-store");
+    return res.json({ ok: true, transaction: detail });
+  } catch (error) {
+    console.error("[giving/transaction]", error.message);
+    const status = error.status === 404 ? 404 : 500;
+    return res.status(status).json({
+      error: status === 404 ? "Transaction not found." : "Could not load transaction details.",
+    });
   }
 });
 
@@ -451,12 +475,9 @@ const useHttps = process.env.DEV_HTTPS !== "false";
 const httpsOptions = useHttps ? loadDevHttpsOptions() : null;
 
 function logLedgerStartup() {
-  try {
-    const count = readLocalDonations().length;
-    console.log(`[ledger] DATA_DIR=${DATA_DIR} file=${CSV_LEDGER} rows=${count}`);
-  } catch (error) {
-    console.warn("[ledger] startup check failed:", error.message);
-  }
+  console.log(
+    `[ledger] source=cybersource ready=${ledgerReady()} env=${process.env.CYBS_ENV || "test"}`,
+  );
 }
 
 if (httpsOptions) {

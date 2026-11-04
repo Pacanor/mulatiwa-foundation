@@ -31,6 +31,10 @@
   let selectedAmount = PRESETS.USD[DEFAULT_PRESET_INDEX];
   let activeClient = null;
   let activeCheckout = null;
+  let checkoutGeneration = 0;
+  let stepTransitionTimer = null;
+  const stage = root.querySelector(".donate-stage") || root;
+  const steps = [amountStep, checkoutStep, thanksStep, declinedStep].filter(Boolean);
 
   const formatAmount = (value, code = currency) => {
     const number = Number(value);
@@ -52,22 +56,46 @@
     el.textContent = message;
   };
 
+  const resetContinueButton = () => {
+    if (!continueBtn) return;
+    continueBtn.disabled = false;
+    continueBtn.textContent = "Donate securely";
+  };
+
+  const measureActiveStepHeight = () => {
+    const active = steps.find((step) => step.classList.contains("is-active"));
+    if (!active || !stage) return;
+    stage.style.height = `${active.offsetHeight}px`;
+  };
+
   const setStep = (name) => {
-    [amountStep, checkoutStep, thanksStep, declinedStep].forEach((step) => {
-      if (!step) return;
-      const active = step.dataset.step === name;
-      step.hidden = !active;
+    const next = steps.find((step) => step.dataset.step === name);
+    if (!next) return;
+
+    if (stage && !stage.style.height) {
+      const current = steps.find((step) => step.classList.contains("is-active")) || next;
+      stage.style.height = `${current.offsetHeight}px`;
+    }
+
+    steps.forEach((step) => {
+      const active = step === next;
+      step.classList.toggle("is-active", active);
       step.classList.toggle("is-entering", active);
-      if (active) {
-        // Retrigger CSS entrance animations
-        void step.offsetWidth;
-        step.classList.add("is-visible");
-      } else {
-        step.classList.remove("is-visible");
-      }
+      step.classList.toggle("is-visible", active);
+      step.setAttribute("aria-hidden", active ? "false" : "true");
     });
+
     root.classList.toggle("is-celebrating", name === "thanks");
     root.classList.toggle("is-soft-fail", name === "declined");
+
+    if (stepTransitionTimer) window.clearTimeout(stepTransitionTimer);
+    // Allow the incoming step to paint, then ease the card height to match.
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        measureActiveStepHeight();
+      });
+    });
+    stepTransitionTimer = window.setTimeout(measureActiveStepHeight, 460);
   };
 
   const showApprovedResult = ({ amount, currency: code }) => {
@@ -198,9 +226,12 @@
   };
 
   const resetToAmount = () => {
+    checkoutGeneration += 1;
     destroyCheckout();
     clearCheckoutContainers();
     showError(checkoutError, "");
+    showError(amountError, "");
+    resetContinueButton();
     if (statusEl) {
       statusEl.hidden = true;
       statusEl.textContent = "";
@@ -282,6 +313,7 @@
     }
 
     showError(amountError, "");
+    const generation = ++checkoutGeneration;
     continueBtn.disabled = true;
     continueBtn.textContent = "Opening secure payment…";
 
@@ -292,6 +324,7 @@
         body: JSON.stringify({ amount, currency }),
       });
       const payload = await response.json().catch(() => ({}));
+      if (generation !== checkoutGeneration) return;
       if (!response.ok) {
         throw new Error(
           payload.error ||
@@ -300,6 +333,7 @@
       }
 
       await loadScript(payload.client_library, payload.client_library_integrity);
+      if (generation !== checkoutGeneration) return;
 
       if (typeof window.VAS?.UnifiedCheckout !== "function") {
         throw new Error(
@@ -319,9 +353,11 @@
         statusEl.hidden = false;
         statusEl.textContent = "Opening secure card payment…";
       }
+      measureActiveStepHeight();
 
       // Trigger opens card entry directly — skips the "Checkout with card" button list.
       activeClient = await window.VAS.UnifiedCheckout(payload.capture_context);
+      if (generation !== checkoutGeneration) return;
       activeCheckout = activeClient.createTrigger("PANENTRY", {
         displayMode: "sidebar",
         autoProcessing: true,
@@ -333,7 +369,9 @@
       }
 
       const mountResponse = await activeCheckout.mount("#ucPaymentContainer");
+      if (generation !== checkoutGeneration) return;
       const completeResponse = await finalizeCheckoutResult(mountResponse);
+      if (generation !== checkoutGeneration) return;
       const reference = extractReference(completeResponse);
       const resultJwt = typeof completeResponse === "string" ? completeResponse : "";
 
@@ -350,6 +388,7 @@
         reference,
         resultJwt,
       });
+      if (generation !== checkoutGeneration) return;
 
       destroyCheckout();
       clearCheckoutContainers();
@@ -364,6 +403,7 @@
         currency: payload.currency,
       });
     } catch (error) {
+      if (generation !== checkoutGeneration) return;
       console.error("[donate]", error);
       const rawMessage = error?.message && typeof error.message === "string" ? error.message : "";
       const reason = error?.reason || "";
@@ -422,16 +462,18 @@
         console.error("[donate] failed notify failed", notifyError);
       }
 
-      if (checkoutStep && !checkoutStep.hidden) {
+      if (checkoutStep?.classList.contains("is-active")) {
         showError(checkoutError, friendly);
         if (statusEl) statusEl.hidden = true;
+        measureActiveStepHeight();
       } else {
         showError(amountError, friendly);
         setStep("amount");
       }
     } finally {
-      continueBtn.disabled = false;
-      continueBtn.textContent = "Donate securely";
+      if (generation === checkoutGeneration) {
+        resetContinueButton();
+      }
     }
   };
 
@@ -474,6 +516,7 @@
 
   renderPresets();
   setStep("amount");
+  window.addEventListener("resize", measureActiveStepHeight);
 
   // Local/UI previews: /donate.html?preview=success|declined
   const preview = new URLSearchParams(window.location.search).get("preview");

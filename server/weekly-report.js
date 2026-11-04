@@ -1,4 +1,4 @@
-const { readDonations, summarizeWeek } = require("./ledger");
+const { buildWeekDonations, summarizeWeek } = require("./ledger");
 const { formatMoney, STAFF_TO } = require("./mail");
 const { buildReportUrl } = require("./report-token");
 
@@ -141,15 +141,11 @@ async function sendWeeklyReportEmail(summary, { to } = {}) {
 }
 
 async function buildWeeklySummary(now = new Date()) {
-  const donations = await readDonations();
+  const donations = await buildWeekDonations(now);
   const summary = summarizeWeek(donations, now);
-  const weekStart = new Date(summary.startIso);
-  const weekEnd = new Date(summary.endIso);
   const failedCount = donations.filter((row) => {
     const status = String(row.status || "").toLowerCase();
-    if (!status || status === "approved") return false;
-    const at = new Date(row.recorded_at);
-    return !Number.isNaN(at.getTime()) && at >= weekStart && at < weekEnd;
+    return status && status !== "approved";
   }).length;
   return { ...summary, failedCount };
 }

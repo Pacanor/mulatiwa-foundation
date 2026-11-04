@@ -1,161 +1,344 @@
-const fs = require("fs");
-const path = require("path");
+const crypto = require("crypto");
+const { getHost } = require("./cybersource");
 
-const SHEET_ID =
-  process.env.GOOGLE_SHEET_ID || "1-BfsegzvrqhRZAafrS43MGjfCKCUQ5jKHEIuLZ8zF1s";
+const TIME_ZONE = "Africa/Lusaka";
 
-function resolveDataDir() {
-  if (process.env.DATA_DIR) {
-    return path.resolve(process.env.DATA_DIR);
+function credentials() {
+  const merchantId = process.env.MERCHANT_ID;
+  const keyId = process.env.CYBS_KEY_ID;
+  const secretKey = process.env.CYBS_SECRET_KEY;
+  if (!merchantId || !keyId || !secretKey) return null;
+  return { merchantId, keyId, secretKey };
+}
+
+function ledgerReady() {
+  return Boolean(credentials());
+}
+
+function createSignatureHeader({
+  method,
+  resourcePath,
+  host,
+  date,
+  digest,
+  merchantId,
+  keyId,
+  secretKey,
+}) {
+  const requestTarget = `${method.toLowerCase()} ${resourcePath}`;
+  const lines = [`host: ${host}`, `date: ${date}`, `(request-target): ${requestTarget}`];
+  if (digest) lines.push(`digest: ${digest}`);
+  lines.push(`v-c-merchant-id: ${merchantId}`);
+  const signature = crypto
+    .createHmac("sha256", Buffer.from(secretKey, "base64"))
+    .update(lines.join("\n"), "utf8")
+    .digest("base64");
+  const headers = digest
+    ? "host date (request-target) digest v-c-merchant-id"
+    : "host date (request-target) v-c-merchant-id";
+  return `keyid="${keyId}", algorithm="HmacSHA256", headers="${headers}", signature="${signature}"`;
+}
+
+async function cybsRequest({ method, resourcePath, bodyObject }) {
+  const creds = credentials();
+  if (!creds) {
+    throw new Error("Cybersource credentials are not configured");
   }
-  const volumeDir = "/data";
-  try {
-    if (fs.existsSync(volumeDir)) {
-      fs.accessSync(volumeDir, fs.constants.W_OK);
-      return volumeDir;
-    }
-  } catch {
-    // fall through
-  }
-  return path.join(__dirname, "..", "data");
-}
-
-const DATA_DIR = resolveDataDir();
-const CSV_LEDGER = path.join(DATA_DIR, "donations.csv");
-
-const CSV_HEADERS = [
-  "recorded_at",
-  "status",
-  "amount",
-  "currency",
-  "donor_name",
-  "donor_email",
-  "reference",
-  "error_message",
-];
-
-function ensureDataDir() {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-  }
-}
-
-function csvEscape(value) {
-  const text = value == null ? "" : String(value);
-  if (/[",\n\r]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
-  }
-  return text;
-}
-
-function toCsvRow(row) {
-  return CSV_HEADERS.map((key) => csvEscape(row[key] ?? "")).join(",");
-}
-
-function ensureCsvHeader() {
-  ensureDataDir();
-  if (!fs.existsSync(CSV_LEDGER)) {
-    fs.writeFileSync(CSV_LEDGER, `${CSV_HEADERS.join(",")}\n`, "utf8");
-  }
-}
-
-function parseCsvLine(line) {
-  const cells = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i += 1) {
-    const ch = line[i];
-    if (inQuotes) {
-      if (ch === '"') {
-        if (line[i + 1] === '"') {
-          current += '"';
-          i += 1;
-        } else {
-          inQuotes = false;
-        }
-      } else {
-        current += ch;
-      }
-    } else if (ch === '"') {
-      inQuotes = true;
-    } else if (ch === ",") {
-      cells.push(current);
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  cells.push(current);
-  return cells;
-}
-
-function appendLocalCsv(row) {
-  ensureCsvHeader();
-  fs.appendFileSync(CSV_LEDGER, `${toCsvRow(row)}\n`, "utf8");
-}
-
-function readLocalCsv() {
-  if (!fs.existsSync(CSV_LEDGER)) return [];
-  const lines = fs
-    .readFileSync(CSV_LEDGER, "utf8")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  if (lines.length <= 1) return [];
-  const header = parseCsvLine(lines[0]);
-  return lines.slice(1).map((line) => {
-    const cells = parseCsvLine(line);
-    const row = {};
-    header.forEach((key, index) => {
-      row[key] = cells[index] ?? "";
-    });
-    return row;
+  const env = process.env.CYBS_ENV === "production" ? "production" : "test";
+  const host = getHost(env);
+  const body = bodyObject ? JSON.stringify(bodyObject) : null;
+  const date = new Date().toUTCString();
+  const digest = body
+    ? `SHA-256=${crypto.createHash("sha256").update(body, "utf8").digest("base64")}`
+    : null;
+  const signature = createSignatureHeader({
+    method,
+    resourcePath,
+    host,
+    date,
+    digest,
+    ...creds,
   });
-}
+  const headers = {
+    Host: host,
+    Date: date,
+    Signature: signature,
+    "v-c-merchant-id": creds.merchantId,
+    Accept: "application/hal+json, application/json",
+  };
+  if (digest) {
+    headers.Digest = digest;
+    headers["Content-Type"] = "application/json";
+  }
 
-function webhookUrl() {
-  return String(process.env.DONATION_LEDGER_WEBHOOK_URL || "").trim();
-}
-
-function exportUrl() {
-  return String(
-    process.env.DONATION_LEDGER_EXPORT_URL || process.env.DONATION_LEDGER_WEBHOOK_URL || "",
-  ).trim();
-}
-
-async function appendRemoteSheet(row) {
-  const webhook = webhookUrl();
-  if (!webhook) return { skipped: true };
-
-  const response = await fetch(webhook, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(row),
+  const response = await fetch(`https://${host}${resourcePath}`, {
+    method,
+    headers,
+    body: body || undefined,
   });
   const text = await response.text();
-  if (!response.ok) {
-    throw new Error(`Sheet webhook failed (${response.status}): ${text}`);
+  let parsed = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
   }
-  return { ok: true, body: text };
+  if (!response.ok) {
+    const error = new Error(`Cybersource ${method} ${resourcePath} failed (${response.status})`);
+    error.status = response.status;
+    error.details = text;
+    error.payload = parsed;
+    throw error;
+  }
+  return parsed;
 }
 
-async function readRemoteSheet() {
-  const url = exportUrl();
-  if (!url) return null;
+function relativeRangeQuery(from, to, now = new Date()) {
+  // This merchant's TSS rejects absolute ISO timestamps and only accepts NOW-relative
+  // expressions. Pull a covering window, then filter precisely in-process.
+  const nowMs = now.getTime();
+  const fromMs = new Date(from).getTime();
+  const toMs = new Date(to).getTime();
+  const daysBack = Math.max(0, Math.ceil((nowMs - fromMs) / 86400000) + 1);
+  const daysForward = Math.max(0, Math.ceil((toMs - nowMs) / 86400000) + 1);
+  return `submitTimeUtc:[NOW/DAY-${daysBack}DAYS TO NOW/DAY+${daysForward}DAYS]`;
+}
 
-  const response = await fetch(url, {
-    headers: { Accept: "application/json" },
+function mapOverallStatus(applicationInformation = {}, errorInformation = {}) {
+  const flag = String(applicationInformation.rFlag || "").toUpperCase();
+  const rCode = String(applicationInformation.rCode ?? "");
+  const reason = String(applicationInformation.reasonCode ?? "");
+
+  if (flag === "SOK" || rCode === "1" || reason === "100") return "approved";
+  if (
+    flag.includes("REJECT") ||
+    flag.includes("DECLINE") ||
+    flag === "DREJECT" ||
+    rCode === "0" ||
+    reason === "481" ||
+    reason === "203"
+  ) {
+    return "declined";
+  }
+  if (errorInformation?.message) return "failed";
+  if (!flag && !rCode && !reason) {
+    // Fall back to application outcomes when the summary omits overall flags.
+    const apps = applicationInformation.applications || [];
+    const auth = apps.find((app) => app.name === "ics_auth");
+    const decision = apps.find((app) => app.name === "ics_decision");
+    if (decision && String(decision.rFlag || "").toUpperCase().includes("REJECT")) {
+      return "declined";
+    }
+    if (auth && (String(auth.rFlag || "").toUpperCase() === "SOK" || String(auth.rCode) === "1")) {
+      return "approved";
+    }
+  }
+  return "failed";
+}
+
+function explainFailure(summary) {
+  const apps = summary?.applicationInformation?.applications || [];
+  const decisionMessage = apps.find((app) =>
+    String(app.rFlag || "").toUpperCase().includes("REJECT") ||
+    String(app.rFlag || "").toUpperCase().includes("DECLINE") ||
+    String(app.rCode) === "0",
+  )?.rMessage;
+  const errorMessage = summary?.errorInformation?.message || "";
+  const riskDecision = summary?.riskInformation?.profile?.decision;
+  const riskRules = (summary?.riskInformation?.rules || [])
+    .filter((rule) => String(rule.decision || "").toUpperCase() === "REJECT")
+    .map((rule) => rule.name)
+    .filter(Boolean)
+    .join(", ");
+  const parts = [];
+  if (errorMessage) parts.push(errorMessage);
+  else if (decisionMessage) parts.push(decisionMessage);
+  if (riskRules) parts.push(`Risk rule: ${riskRules}`);
+  else if (riskDecision && String(riskDecision).toUpperCase() !== "ACCEPT") {
+    parts.push(`Risk: ${riskDecision}`);
+  }
+  const reason = summary?.applicationInformation?.reasonCode;
+  if (reason && String(reason) !== "100") parts.push(`Reason ${reason}`);
+  return parts.join(" — ") || "";
+}
+
+function cardLabel(paymentInformation = {}) {
+  const card = paymentInformation.card || {};
+  const method = paymentInformation.paymentType?.method || "";
+  const brand =
+    method === "VI" || card.type === "001"
+      ? "Visa"
+      : method === "MC" || card.type === "002"
+        ? "Mastercard"
+        : method || "Card";
+  const suffix = card.suffix ? `•••• ${card.suffix}` : "";
+  return [brand, suffix].filter(Boolean).join(" ");
+}
+
+function normalizeSummary(summary) {
+  const billTo = summary?.orderInformation?.billTo || {};
+  const amountDetails = summary?.orderInformation?.amountDetails || {};
+  const status = mapOverallStatus(summary?.applicationInformation, summary?.errorInformation);
+  const first = billTo.firstName || "";
+  const last = billTo.lastName || "";
+  const donorName = [first, last].filter(Boolean).join(" ").trim();
+
+  return {
+    id: summary.id,
+    recorded_at: summary.submitTimeUtc || summary.submitTimeUTC || "",
+    status,
+    amount: amountDetails.totalAmount || amountDetails.authorizedAmount || "",
+    currency: String(amountDetails.currency || "").toUpperCase(),
+    donor_name: donorName,
+    donor_email: billTo.email || "",
+    reference: summary.id || summary.reconciliationId || "",
+    client_reference: summary?.clientReferenceInformation?.code || "",
+    error_message: status === "approved" ? "" : explainFailure(summary),
+    card: cardLabel(summary.paymentInformation),
+    approval_code: summary?.processorInformation?.approvalCode || "",
+    processor: summary?.processorInformation?.processor?.name || "",
+    reason_code: String(summary?.applicationInformation?.reasonCode || ""),
+    applications: summary?.applicationInformation?.applications || [],
+  };
+}
+
+function friendlyDetail(detail) {
+  const row = normalizeSummary(detail);
+  const billTo = detail?.orderInformation?.billTo || {};
+  const apps = detail?.applicationInformation?.applications || [];
+  const riskRules = detail?.riskInformation?.rules || [];
+  const authApp = apps.find((app) => app.name === "ics_auth") || {};
+  const decisionApp = apps.find((app) => app.name === "ics_decision") || {};
+  const billApp = apps.find((app) => app.name === "ics_bill") || {};
+
+  return {
+    ...row,
+    reconciliation_id: detail.reconciliationId || detail.id || "",
+    submit_time: detail.submitTimeUTC || detail.submitTimeUtc || row.recorded_at,
+    merchant_id: detail.merchantId || "",
+    bill_to: {
+      name: row.donor_name,
+      email: row.donor_email,
+      country: billTo.country || "",
+      postal_code: billTo.postalCode || "",
+      state: billTo.administrativeArea || billTo.state || "",
+    },
+    payment: {
+      card: row.card,
+      prefix: detail?.paymentInformation?.card?.prefix || "",
+      suffix: detail?.paymentInformation?.card?.suffix || "",
+      expiration: [
+        detail?.paymentInformation?.card?.expirationMonth,
+        detail?.paymentInformation?.card?.expirationYear,
+      ]
+        .filter(Boolean)
+        .join("/"),
+      type: detail?.paymentInformation?.paymentType?.type || "",
+      method: detail?.paymentInformation?.paymentType?.method || "",
+    },
+    processor: {
+      name: detail?.processorInformation?.processor?.name || "",
+      approval_code: detail?.processorInformation?.approvalCode || "",
+      response_code: detail?.processorInformation?.responseCode || "",
+      retrieval_reference: detail?.processorInformation?.retrievalReferenceNumber || "",
+      avs: detail?.processorInformation?.avs?.code || "",
+      cvv: detail?.processorInformation?.cardVerification?.resultCode || "",
+    },
+    decision: {
+      overall_reason: String(detail?.applicationInformation?.reasonCode || ""),
+      overall_flag: detail?.applicationInformation?.rFlag || "",
+      message: detail?.errorInformation?.message || decisionApp.rMessage || "",
+      risk_profile: detail?.riskInformation?.profile?.name || "",
+      risk_decision: detail?.riskInformation?.profile?.decision || "",
+      risk_rules: riskRules.map((rule) => ({
+        name: rule.name || "",
+        decision: rule.decision || "",
+      })),
+    },
+    services: {
+      authorization: {
+        status: authApp.rFlag || "",
+        reason_code: authApp.reasonCode || "",
+        message: authApp.rMessage || "",
+      },
+      capture: {
+        status: billApp.rFlag || (billApp.name ? "requested" : ""),
+        reason_code: billApp.reasonCode || "",
+        message: billApp.rMessage || "",
+      },
+      decision_manager: {
+        status: decisionApp.rFlag || "",
+        reason_code: decisionApp.reasonCode || "",
+        message: decisionApp.rMessage || "",
+      },
+    },
+    applications: apps.map((app) => ({
+      name: app.name || "",
+      status: app.rFlag || "",
+      reason_code: app.reasonCode || "",
+      message: app.rMessage || "",
+    })),
+    raw_status: detail.status || "",
+  };
+}
+
+async function searchTransactions({ from, to, limit = 500 } = {}) {
+  const end = to || new Date();
+  const start = from || new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  const pageSize = Math.min(Number(limit) || 500, 2500);
+  let offset = 0;
+  const all = [];
+
+  while (offset < 10000) {
+    const payload = await cybsRequest({
+      method: "POST",
+      resourcePath: "/tss/v2/searches",
+      bodyObject: {
+        save: false,
+        name: "Mulatiwa donations",
+        timezone: TIME_ZONE,
+        query: relativeRangeQuery(start, end),
+        offset,
+        limit: pageSize,
+        sort: "submitTimeUtc:desc",
+      },
+    });
+
+    const batch = payload?._embedded?.transactionSummaries || [];
+    all.push(
+      ...batch
+        .map(normalizeSummary)
+        .filter((row) => {
+          const at = new Date(row.recorded_at).getTime();
+          return Number.isFinite(at) && at >= startMs && at <= endMs;
+        }),
+    );
+
+    const total = Number(payload?.totalCount || 0);
+    offset += batch.length;
+    if (!batch.length || offset >= total || batch.length < pageSize) break;
+  }
+
+  return all;
+}
+
+async function getTransaction(id) {
+  if (!id) throw new Error("Missing transaction id");
+  const detail = await cybsRequest({
+    method: "GET",
+    resourcePath: `/tss/v2/transactions/${encodeURIComponent(id)}`,
   });
-  if (!response.ok) {
-    throw new Error(`Sheet export failed (${response.status})`);
-  }
-  const payload = await response.json();
-  if (Array.isArray(payload)) return payload;
-  if (Array.isArray(payload.donations)) return payload.donations;
-  return [];
+  return friendlyDetail(detail);
 }
 
-function toRow(donation) {
+async function readDonations(options = {}) {
+  return searchTransactions(options);
+}
+
+async function recordDonation(donation) {
+  // Durable payment history lives in Cybersource. This returns the email/ledger shape only.
   return {
     recorded_at: donation.whenIso || donation.recorded_at || new Date().toISOString(),
     status: donation.status || "approved",
@@ -168,46 +351,7 @@ function toRow(donation) {
   };
 }
 
-async function recordDonation(donation) {
-  const row = toRow(donation);
-
-  // Local mirror helps local testing; production durability is the Sheet.
-  try {
-    appendLocalCsv(row);
-  } catch (error) {
-    console.warn("[ledger] local csv append failed:", error.message);
-  }
-
-  try {
-    const remote = await appendRemoteSheet(row);
-    if (remote?.skipped) {
-      console.warn(
-        "[ledger] DONATION_LEDGER_WEBHOOK_URL missing; saved locally only (ephemeral on App Platform)",
-      );
-    }
-  } catch (error) {
-    // Never fail the donor experience if the Sheet webhook is down.
-    console.error("[ledger] sheet append failed:", error.message);
-  }
-
-  return row;
-}
-
-async function readDonations() {
-  try {
-    const remote = await readRemoteSheet();
-    if (remote) return remote;
-  } catch (error) {
-    console.warn("[ledger] sheet read failed, falling back to local:", error.message);
-  }
-  return readLocalCsv();
-}
-
-function readLocalDonations() {
-  return readLocalCsv();
-}
-
-function zonedYmd_(date = new Date(), timeZone = "Africa/Lusaka") {
+function zonedYmd_(date = new Date(), timeZone = TIME_ZONE) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone,
     year: "numeric",
@@ -218,7 +362,7 @@ function zonedYmd_(date = new Date(), timeZone = "Africa/Lusaka") {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-function weekdayInZone_(date = new Date(), timeZone = "Africa/Lusaka") {
+function weekdayInZone_(date = new Date(), timeZone = TIME_ZONE) {
   const label = new Intl.DateTimeFormat("en-US", {
     timeZone,
     weekday: "short",
@@ -233,7 +377,6 @@ function addDaysYmd_(ymd, days) {
 }
 
 function dayBoundsUtc_(ymd) {
-  // Treat calendar days in Africa/Lusaka (UTC+2, no DST).
   const start = new Date(`${ymd}T00:00:00.000+02:00`);
   const next = addDaysYmd_(ymd, 1);
   const end = new Date(`${next}T00:00:00.000+02:00`);
@@ -241,7 +384,6 @@ function dayBoundsUtc_(ymd) {
 }
 
 function summarizeWeek(donations, now = new Date()) {
-  // Previous complete Mon–Sun in Africa/Lusaka (matches Monday cron).
   const today = zonedYmd_(now);
   const dow = weekdayInZone_(now);
   const daysFromMonday = (dow + 6) % 7;
@@ -272,34 +414,22 @@ function summarizeWeek(donations, now = new Date()) {
   };
 }
 
-function ledgerReady() {
-  if (webhookUrl()) return true;
-  try {
-    ensureDataDir();
-    fs.accessSync(DATA_DIR, fs.constants.W_OK);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function donationsToCsv(rows) {
-  const lines = [CSV_HEADERS.join(",")];
-  rows.forEach((row) => {
-    lines.push(toCsvRow(toRow(row)));
+async function buildWeekDonations(now = new Date()) {
+  const summary = summarizeWeek([], now);
+  return searchTransactions({
+    from: new Date(summary.startIso),
+    to: new Date(summary.endIso),
   });
-  return `${lines.join("\n")}\n`;
 }
 
 module.exports = {
   recordDonation,
   readDonations,
-  readLocalDonations,
+  searchTransactions,
+  getTransaction,
   summarizeWeek,
+  buildWeekDonations,
   ledgerReady,
-  donationsToCsv,
-  CSV_HEADERS,
-  CSV_LEDGER,
-  DATA_DIR,
-  SHEET_ID,
+  normalizeSummary,
+  friendlyDetail,
 };

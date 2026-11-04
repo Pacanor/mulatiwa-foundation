@@ -77,7 +77,8 @@
           </div>
 
           <div class="donate-panel" data-donate>
-            <div class="donate-step" data-step="amount">
+            <div class="donate-stage">
+            <div class="donate-step is-active" data-step="amount">
               <div class="currency-toggle" role="group" aria-label="Donation currency">
                 <button type="button" class="currency-option is-active" data-currency="USD" aria-pressed="true">
                   USD
@@ -117,7 +118,7 @@
               <p class="donate-error" data-error hidden role="alert"></p>
             </div>
 
-            <div class="donate-step donate-checkout" data-step="checkout" hidden>
+            <div class="donate-step donate-checkout" data-step="checkout">
               <button type="button" class="donate-back" data-back>
                 ← Change amount
               </button>
@@ -131,7 +132,7 @@
               <p class="donate-error" data-checkout-error hidden role="alert"></p>
             </div>
 
-            <div class="donate-step donate-result donate-result-success" data-step="thanks" hidden>
+            <div class="donate-step donate-result donate-result-success" data-step="thanks">
               <div class="result-burst" aria-hidden="true">
                 <span></span><span></span><span></span><span></span><span></span><span></span>
                 <span></span><span></span><span></span><span></span><span></span><span></span>
@@ -162,7 +163,7 @@
               </div>
             </div>
 
-            <div class="donate-step donate-result donate-result-declined" data-step="declined" hidden>
+            <div class="donate-step donate-result donate-result-declined" data-step="declined">
               <div class="result-heading result-heading-declined">
                 <span class="result-mark result-mark-declined" aria-hidden="true">
                   <svg viewBox="0 0 48 48" fill="none">
@@ -184,6 +185,7 @@
                   href="mailto:e.munalula@mulatiwafoundation.org?subject=Donation%20help&body=Hi.%20I%20just%20tried%20to%20make%20a%20donation%20and%20it%20seems%20to%20have%20failed.%0A%0A"
                 >Contact us</a>
               </div>
+            </div>
             </div>
           </div>
         </div>

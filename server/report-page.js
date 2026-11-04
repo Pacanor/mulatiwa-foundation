@@ -358,17 +358,17 @@ function renderRows(rows) {
       const status = String(row.status || "unknown");
       const statusClass = status === "approved" ? "is-approved" : "is-failed";
       const money = formatMoney(row.amount, row.currency);
-      const note = row.error_message || "";
+      const note = row.error_message || row.card || "";
       const mailto =
         row.donor_email &&
         `mailto:${encodeURIComponent(row.donor_email)}?subject=${encodeURIComponent(
           "About your donation to Mulatiwa Foundation",
         )}`;
       const emailCell = row.donor_email
-        ? `<a class="email-link" href="${mailto}">${escapeHtml(row.donor_email)}</a>`
+        ? `<a class="email-link" href="${mailto}" data-stop-row="1">${escapeHtml(row.donor_email)}</a>`
         : "—";
       return `
-      <tr data-row-index="${index}">
+      <tr class="donation-row" data-row-index="${index}" data-txn-id="${escapeHtml(row.id || row.reference || "")}" tabindex="0" role="button" aria-label="View donation details">
         <td>${escapeHtml(when)}</td>
         <td><span class="status ${statusClass}">${escapeHtml(status)}</span></td>
         <td><strong>${escapeHtml(money)}</strong></td>
@@ -571,6 +571,8 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     .email-link:hover { text-decoration: underline; }
     .note-cell { color: var(--muted); max-width: 260px; }
     .empty { padding: 28px 16px; color: var(--muted); }
+    .donation-row { cursor: pointer; transition: background 140ms ease; }
+    .donation-row:hover, .donation-row:focus-visible { background: rgba(27, 94, 168, 0.05); outline: none; }
     .pager {
       display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
       gap: 12px; margin: 14px 0 0;
@@ -585,10 +587,60 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     .pager-btn:disabled { opacity: 0.45; cursor: default; }
     .pager-page { min-width: 4.5rem; text-align: center; font-size: 13px; font-weight: 700; color: var(--navy); }
     .footnote { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
+    .modal-backdrop {
+      position: fixed; inset: 0; display: none; place-items: center; padding: 24px;
+      background: rgba(12, 28, 48, 0.52); backdrop-filter: blur(4px); z-index: 40;
+    }
+    .modal-backdrop.is-open { display: grid; }
+    .modal {
+      width: min(720px, 100%); max-height: min(86vh, 900px); overflow: auto;
+      border-radius: 24px; background: var(--paper); border: 1px solid var(--line);
+      box-shadow: 0 28px 70px rgba(12, 28, 48, 0.28);
+    }
+    .modal-header {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+      padding: 22px 24px 12px; border-bottom: 1px solid rgba(18, 58, 109, 0.08);
+    }
+    .modal-header h2 {
+      margin: 6px 0 0; font-family: Georgia, "Times New Roman", serif; color: var(--navy);
+      font-size: 1.55rem; line-height: 1.15; letter-spacing: -0.02em;
+    }
+    .modal-close {
+      border: 0; background: rgba(18, 58, 109, 0.06); color: var(--navy); width: 40px; height: 40px;
+      border-radius: 999px; font: inherit; font-size: 22px; line-height: 1; cursor: pointer;
+    }
+    .modal-body { padding: 18px 24px 26px; }
+    .detail-grid {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 18px; margin: 0 0 18px;
+    }
+    .detail-item {
+      padding: 12px 14px; border-radius: 14px; background: rgba(18, 58, 109, 0.04);
+      border: 1px solid rgba(18, 58, 109, 0.08);
+    }
+    .detail-item span {
+      display: block; font-size: 11px; font-weight: 800; letter-spacing: 0.1em;
+      text-transform: uppercase; color: var(--muted); margin-bottom: 6px;
+    }
+    .detail-item strong { color: var(--ink); font-size: 14px; font-weight: 700; word-break: break-word; }
+    .detail-section { margin: 0 0 18px; }
+    .detail-section h3 {
+      margin: 0 0 10px; color: var(--navy); font-size: 12px; font-weight: 800;
+      letter-spacing: 0.12em; text-transform: uppercase;
+    }
+    .detail-list { margin: 0; padding: 0; list-style: none; }
+    .detail-list li {
+      display: flex; justify-content: space-between; gap: 16px; padding: 10px 0;
+      border-bottom: 1px solid rgba(18, 58, 109, 0.08); font-size: 14px;
+    }
+    .detail-list li:last-child { border-bottom: 0; }
+    .detail-list .muted { color: var(--muted); }
+    .modal-loading, .modal-error { color: var(--muted); font-size: 14px; padding: 12px 0; }
+    .modal-error { color: var(--fail); }
     @media (max-width: 820px) {
       .stats { grid-template-columns: 1fr; }
       .stat-total .totals-row { flex-wrap: wrap; white-space: normal; }
       .toolbar { align-items: stretch; flex-direction: column; }
+      .detail-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -666,8 +718,20 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
           <button type="button" class="pager-btn" id="pager-next" aria-label="Next page">Next</button>
         </div>
       </div>
-      <p class="footnote">Link access expires after about 7 days. Open a fresh link from a staff donation email when needed.</p>
+      <p class="footnote">Data is loaded live from Cybersource. Link access expires after about 7 days — open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
     </section>
+  </div>
+  <div class="modal-backdrop" id="txn-modal" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="txn-modal-title">
+      <div class="modal-header">
+        <div>
+          <p class="eyebrow" style="margin:0">Transaction detail</p>
+          <h2 id="txn-modal-title">Donation</h2>
+        </div>
+        <button type="button" class="modal-close" id="txn-modal-close" aria-label="Close">×</button>
+      </div>
+      <div class="modal-body" id="txn-modal-body"></div>
+    </div>
   </div>
   <script>
     (function () {
@@ -779,6 +843,113 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         } finally {
           weeklyBtn.disabled = false;
         }
+      });
+
+      var modal = document.getElementById("txn-modal");
+      var modalBody = document.getElementById("txn-modal-body");
+      var modalTitle = document.getElementById("txn-modal-title");
+      var modalClose = document.getElementById("txn-modal-close");
+
+      function closeModal() {
+        if (!modal) return;
+        modal.classList.remove("is-open");
+        modal.setAttribute("aria-hidden", "true");
+      }
+
+      function money(amount, currency) {
+        var value = Number(amount);
+        if (!Number.isFinite(value)) return String(amount || "—");
+        var formatted = value.toLocaleString("en-ZM", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return currency === "ZMW" ? ("K" + formatted) : ("$" + formatted);
+      }
+
+      function field(label, value) {
+        return '<div class="detail-item"><span>' + label + '</span><strong>' + (value || "—") + '</strong></div>';
+      }
+
+      function openTransaction(id) {
+        if (!id || !modal || !modalBody) return;
+        modal.classList.add("is-open");
+        modal.setAttribute("aria-hidden", "false");
+        modalTitle.textContent = "Loading…";
+        modalBody.innerHTML = '<p class="modal-loading">Fetching Cybersource details…</p>';
+        fetch("/internal/giving/transaction/" + encodeURIComponent(id) + "?t=" + encodeURIComponent(token))
+          .then(function (res) { return res.json().then(function (payload) { return { ok: res.ok, payload: payload }; }); })
+          .then(function (result) {
+            if (!result.ok) throw new Error(result.payload.error || "Could not load details");
+            var tx = result.payload.transaction || {};
+            modalTitle.textContent = money(tx.amount, tx.currency) + " · " + (tx.status || "unknown");
+            var when = tx.submit_time ? new Date(tx.submit_time).toLocaleString("en-ZM", {
+              timeZone: "Africa/Lusaka", dateStyle: "full", timeStyle: "short"
+            }) : "—";
+            var riskRules = (tx.decision && tx.decision.risk_rules || []).map(function (rule) {
+              return '<li><span>' + (rule.name || "Rule") + '</span><span class="muted">' + (rule.decision || "—") + '</span></li>';
+            }).join("") || '<li><span>No risk rules returned</span><span class="muted">—</span></li>';
+            var apps = (tx.applications || []).map(function (app) {
+              return '<li><span>' + (app.name || "service") + '</span><span class="muted">' +
+                [app.status, app.reason_code, app.message].filter(Boolean).join(" · ") + '</span></li>';
+            }).join("") || '<li><span>No services returned</span><span class="muted">—</span></li>';
+            modalBody.innerHTML =
+              '<div class="detail-grid">' +
+                field("When (CAT)", when) +
+                field("Status", tx.status) +
+                field("Amount", money(tx.amount, tx.currency)) +
+                field("Request ID", tx.id || tx.reference) +
+                field("Client reference", tx.client_reference) +
+                field("Card", tx.card || (tx.payment && tx.payment.card)) +
+              '</div>' +
+              '<div class="detail-section"><h3>Donor</h3><div class="detail-grid">' +
+                field("Name", tx.bill_to && tx.bill_to.name) +
+                field("Email", tx.bill_to && tx.bill_to.email) +
+                field("Country", tx.bill_to && tx.bill_to.country) +
+                field("Postal code", tx.bill_to && tx.bill_to.postal_code) +
+              '</div></div>' +
+              '<div class="detail-section"><h3>Processor</h3><div class="detail-grid">' +
+                field("Processor", tx.processor && tx.processor.name) +
+                field("Approval code", tx.processor && tx.processor.approval_code) +
+                field("Response code", tx.processor && tx.processor.response_code) +
+                field("Retrieval ref", tx.processor && tx.processor.retrieval_reference) +
+                field("AVS", tx.processor && tx.processor.avs) +
+                field("CVV result", tx.processor && tx.processor.cvv) +
+              '</div></div>' +
+              '<div class="detail-section"><h3>What happened</h3><div class="detail-grid">' +
+                field("Decision message", tx.decision && tx.decision.message || tx.error_message) +
+                field("Reason code", tx.decision && tx.decision.overall_reason || tx.reason_code) +
+                field("Risk profile", tx.decision && tx.decision.risk_profile) +
+                field("Risk decision", tx.decision && tx.decision.risk_decision) +
+                field("Authorization", tx.services && tx.services.authorization && ([tx.services.authorization.status, tx.services.authorization.message].filter(Boolean).join(" · "))) +
+                field("Capture", tx.services && tx.services.capture && ([tx.services.capture.status, tx.services.capture.message].filter(Boolean).join(" · "))) +
+              '</div><ul class="detail-list">' + riskRules + '</ul></div>' +
+              '<div class="detail-section"><h3>Cybersource services</h3><ul class="detail-list">' + apps + '</ul></div>';
+          })
+          .catch(function (error) {
+            modalTitle.textContent = "Details unavailable";
+            modalBody.innerHTML = '<p class="modal-error">' + (error.message || "Could not load details.") + '</p>';
+          });
+      }
+
+      if (body) {
+        body.addEventListener("click", function (event) {
+          if (event.target && event.target.closest && event.target.closest("[data-stop-row]")) return;
+          var row = event.target.closest ? event.target.closest("tr[data-txn-id]") : null;
+          if (row) openTransaction(row.getAttribute("data-txn-id"));
+        });
+        body.addEventListener("keydown", function (event) {
+          if (event.key !== "Enter" && event.key !== " ") return;
+          var row = event.target.closest ? event.target.closest("tr[data-txn-id]") : null;
+          if (!row) return;
+          event.preventDefault();
+          openTransaction(row.getAttribute("data-txn-id"));
+        });
+      }
+      if (modalClose) modalClose.addEventListener("click", closeModal);
+      if (modal) {
+        modal.addEventListener("click", function (event) {
+          if (event.target === modal) closeModal();
+        });
+      }
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape") closeModal();
       });
     })();
   </script>

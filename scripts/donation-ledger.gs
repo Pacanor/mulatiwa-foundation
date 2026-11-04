@@ -1,4 +1,8 @@
 /**
+ * DEPRECATED — staff reports now read live from Cybersource Transaction Search.
+ * This Apps Script / spreadsheet ledger is no longer used by the website.
+ * Kept only as a historical reference.
+ *
  * Mulatiwa Foundation — Donations ledger (Google Sheet)
  *
  * Setup (once):
@@ -8,9 +12,6 @@
  * 4. Deploy → New deployment → Web app
  *    - Execute as: Me
  *    - Who has access: Anyone
- * 5. Copy the web app URL into App Platform:
- *    DONATION_LEDGER_WEBHOOK_URL=<url>
- *    DONATION_LEDGER_EXPORT_URL=<url>
  *
  * API:
  *  POST JSON row → append donation

@@ -34,18 +34,6 @@ services:
       - key: CYBS_ENV
         scope: RUN_TIME
         value: test
-      - key: DATA_DIR
-        scope: RUN_TIME
-        value: /data
-      - key: GOOGLE_SHEET_ID
-        scope: RUN_TIME
-        value: 1-BfsegzvrqhRZAafrS43MGjfCKCUQ5jKHEIuLZ8zF1s
-      - key: DONATION_LEDGER_WEBHOOK_URL
-        scope: RUN_TIME
-        value: https://script.google.com/macros/s/AKfycbzsaFFuJh25JdCALHjRLqzw2poYB6Dj8txhLK1WEEz3NaCcnw3hUcKIoVL49mV80fA_/exec
-      - key: DONATION_LEDGER_EXPORT_URL
-        scope: RUN_TIME
-        value: https://script.google.com/macros/s/AKfycbzsaFFuJh25JdCALHjRLqzw2poYB6Dj8txhLK1WEEz3NaCcnw3hUcKIoVL49mV80fA_/exec
       - key: MERCHANT_ID
         scope: RUN_TIME
         type: SECRET

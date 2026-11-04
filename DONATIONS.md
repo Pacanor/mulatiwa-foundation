@@ -41,14 +41,9 @@ The live app is still the **old static site** (September build). Do **not** edit
    - `https://<new-app>/api/health` → JSON with `donate_ready` / `mail_ready`
 7. Share the new donate URL with Prof for review
 8. When ready: move any custom domain from the old static app to the new one (DNS/App Platform domains). Old static app stays up until you delete it
-9. **Google Sheet ledger (no paid volume):** use spreadsheet
-   `1-BfsegzvrqhRZAafrS43MGjfCKCUQ5jKHEIuLZ8zF1s`.
-   1. Open [scripts/donation-ledger.gs](scripts/donation-ledger.gs)
-   2. In [Apps Script](https://script.google.com/) create/open a project, paste the file, save
-   3. Run `setupSheet` once (authorize access to the spreadsheet)
-   4. Deploy → New deployment → Web app → Execute as Me → Anyone → Deploy
-   5. Put the web app URL in App Platform secrets `DONATION_LEDGER_WEBHOOK_URL` and `DONATION_LEDGER_EXPORT_URL`
-   6. Confirm `/api/health` shows `ledger_sheet: true`
+9. **Donations log source:** staff reports and weekly email pull live from Cybersource
+   Transaction Search. Confirm `/api/health` shows `ledger_source: "cybersource"` and a
+   non-zero `donation_count` after sandbox gifts exist.
 
 ### 3. Donate UI gating (static vs app)
 
@@ -65,7 +60,7 @@ So Prof can exercise the full flow on the Node URL while the public static domai
 
 - [ ] Open live `/donate.html` and run a sandbox card gift (while `CYBS_ENV=test`)
 - [ ] Confirm donor + Esther emails arrive
-- [ ] Confirm a row lands in `/data/donations.csv` on the app volume (or download via console)
+- [ ] Confirm the gift appears in Cybersource Transaction Management and the staff donations log
 - [ ] Business Center → verify Apple Pay domain using the live HTTPS origin (file is already at `/.well-known/apple-developer-merchantid-domain-association`)
 - [ ] When Zanaco confirms dual currency + go-live: set `CYBS_ENV=production` and production REST keys; one low-value real gift per currency
 
@@ -190,17 +185,16 @@ npm start
 4. Redeploy; run one real low-value test gift in each currency; verify settlement with Zanaco.
 5. Keep sandbox keys out of production env.
 
-## Emails + CSV ledger (no Google, no database)
+## Emails + Cybersource ledger
 
-After each approved gift the server:
+After each gift attempt the server:
 
-1. Appends a row to `data/donations.csv` (or `$DATA_DIR/donations.csv`)
-2. Emails the donor a thank-you (Resend)
+1. Captures/records the payment through Cybersource (source of truth for the staff log)
+2. Emails the donor a thank-you on approved gifts (Resend)
 3. Emails Prof. Esther at `e.munalula@mulatiwafoundation.org` with who / when / how much
+4. Emails failed/declined attempts so staff can follow up
 
-CSV columns: `recorded_at,status,amount,currency,donor_name,donor_email,reference`
-
-On DigitalOcean, `.do/app.yaml` mounts a persistent volume at `/data` with `DATA_DIR=/data` so the CSV survives redeploys. Locally it writes under `data/` (gitignored).
+The staff donations log (`/internal/giving`) and CSV export read live from Cybersource Transaction Search. Click a row for full processor, decision, and risk details.
 
 ### Resend setup
 
@@ -210,10 +204,10 @@ On DigitalOcean, `.do/app.yaml` mounts a persistent volume at `/data` with `DATA
 
 ### Weekly report (Monday 08:30 CAT)
 
-Node cron schedules `runWeeklyReport()` Mondays at 08:30 `Africa/Lusaka` when `WEEKLY_REPORT_CRON=true`, reading the on-server CSV. Manual test: `npm run weekly-report`
+Node cron schedules `runWeeklyReport()` Mondays at 08:30 `Africa/Lusaka` when `WEEKLY_REPORT_CRON=true`, querying last week’s Cybersource transactions. Manual test: `npm run weekly-report`
 
 ## Ops
 
 - Authoritative payment ledger / refunds: Cybersource Business Center → Transaction Management
-- On-server mirror: `donations.csv` (open in Excel / Numbers anytime)
-- Declined / abandoned checkouts show a clear result screen; only approved gifts trigger donor + staff emails.
+- Staff mirror: signed `/internal/giving` link from donation emails
+- Declined / abandoned checkouts show a clear result screen; only approved gifts trigger donor thank-you emails.
