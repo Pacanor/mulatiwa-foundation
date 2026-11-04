@@ -159,7 +159,7 @@ function brandHeader({ eyebrow }) {
 
 function emailFooter({ staffReportUrl } = {}) {
   const link = staffReportUrl
-    ? `<a href="${staffReportUrl}" style="color:${GOLD};text-decoration:none;">View recent gifts</a>`
+    ? `<a href="${staffReportUrl}" style="color:${GOLD};text-decoration:none;">View recent donations</a>`
     : `<a href="${SITE_URL}/" style="color:${GOLD};text-decoration:none;">Visit our website</a>`;
 
   return `

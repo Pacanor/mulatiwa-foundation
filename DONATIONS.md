@@ -140,7 +140,7 @@ Use Visa `4111111111111111` / `12/2026` / `123`, complete checkout, confirm:
 
 ### Staff giving log
 
-Staff donation emails include a discreet **View recent gifts** footer link to `/internal/giving?t=…`.
+Staff donation emails include a discreet **View recent donations** footer link to `/internal/giving?t=…`.
 
 - Signed with `REPORT_SECRET` (falls back to `CYBS_SECRET_KEY`), valid ~7 days, reusable in that window
 - Not linked from the public site; `robots.txt` disallows `/internal/`
