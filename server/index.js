@@ -264,16 +264,19 @@ app.post("/api/donate/complete", async (req, res) => {
 
     await recordDonation(donation);
 
-    if (normalizedStatus === "approved") {
-      await sendDonationEmails(donation);
-    } else {
-      await sendFailedDonationEmail(donation);
+    const isSeed = String(donation.reference || "").startsWith("SEED-");
+    if (!isSeed) {
+      if (normalizedStatus === "approved") {
+        await sendDonationEmails(donation);
+      } else {
+        await sendFailedDonationEmail(donation);
+      }
     }
 
     return res.json({
       ok: true,
       recorded: true,
-      donor_email_sent: Boolean(donation.email),
+      donor_email_sent: Boolean(donation.email) && !isSeed,
       reference: donation.reference,
       status: normalizedStatus,
     });

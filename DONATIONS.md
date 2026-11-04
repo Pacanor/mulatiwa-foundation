@@ -41,7 +41,14 @@ The live app is still the **old static site** (September build). Do **not** edit
    - `https://<new-app>/api/health` → JSON with `donate_ready` / `mail_ready`
 7. Share the new donate URL with Prof for review
 8. When ready: move any custom domain from the old static app to the new one (DNS/App Platform domains). Old static app stays up until you delete it
-9. **Persistent volume required:** attach a volume at `/data` and set `DATA_DIR=/data`. Without it, `donations.csv` lives on ephemeral disk and is wiped on every redeploy (this is why earlier test rows disappeared). Confirm in App → Settings → resources that the volume is mounted, then check `/api/health` for `donation_count`.
+9. **Google Sheet ledger (no paid volume):** use spreadsheet
+   `1-BfsegzvrqhRZAafrS43MGjfCKCUQ5jKHEIuLZ8zF1s`.
+   1. Open [scripts/donation-ledger.gs](scripts/donation-ledger.gs)
+   2. In [Apps Script](https://script.google.com/) create/open a project, paste the file, save
+   3. Run `setupSheet` once (authorize access to the spreadsheet)
+   4. Deploy → New deployment → Web app → Execute as Me → Anyone → Deploy
+   5. Put the web app URL in App Platform secrets `DONATION_LEDGER_WEBHOOK_URL` and `DONATION_LEDGER_EXPORT_URL`
+   6. Confirm `/api/health` shows `ledger_sheet: true`
 
 ### 3. Donate UI gating (static vs app)
 
