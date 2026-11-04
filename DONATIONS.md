@@ -41,7 +41,7 @@ The live app is still the **old static site** (September build). Do **not** edit
    - `https://<new-app>/api/health` → JSON with `donate_ready` / `mail_ready`
 7. Share the new donate URL with Prof for review
 8. When ready: move any custom domain from the old static app to the new one (DNS/App Platform domains). Old static app stays up until you delete it
-9. Optional: if the 1 GiB volume isn’t available on your plan, remove it in the App settings and set `DATA_DIR=/tmp/mulatiwa-data` (CSV won’t survive redeploys until a volume is attached)
+9. **Persistent volume required:** attach a volume at `/data` and set `DATA_DIR=/data`. Without it, `donations.csv` lives on ephemeral disk and is wiped on every redeploy (this is why earlier test rows disappeared). Confirm in App → Settings → resources that the volume is mounted, then check `/api/health` for `donation_count`.
 
 ### 3. Donate UI gating (static vs app)
 

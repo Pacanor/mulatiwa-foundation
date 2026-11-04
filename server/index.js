@@ -7,7 +7,7 @@ const dotenv = require("dotenv");
 const cron = require("node-cron");
 const { createCaptureContext } = require("./cybersource");
 const { enrichDonation } = require("./donations");
-const { recordDonation, ledgerReady } = require("./ledger");
+const { recordDonation, ledgerReady, readLocalDonations, CSV_LEDGER, DATA_DIR } = require("./ledger");
 const {
   sendDonationEmails,
   sendFailedDonationEmail,
@@ -138,6 +138,12 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
 
 app.get("/api/health", (_req, res) => {
+  let donationCount = 0;
+  try {
+    donationCount = readLocalDonations().length;
+  } catch {
+    donationCount = 0;
+  }
   res.json({
     status: "ok",
     cybs_env: process.env.CYBS_ENV || "test",
@@ -146,6 +152,8 @@ app.get("/api/health", (_req, res) => {
     ),
     mail_ready: Boolean(process.env.RESEND_API_KEY),
     ledger_ready: ledgerReady(),
+    ledger_dir: DATA_DIR,
+    donation_count: donationCount,
   });
 });
 
@@ -266,6 +274,7 @@ app.get("/internal/giving", (req, res) => {
     .type("html")
     .send(
       renderReportPage({
+        periodInput: req.query.period,
         fromInput: req.query.from,
         toInput: req.query.to,
         token,
@@ -357,10 +366,20 @@ if (process.env.WEEKLY_REPORT_CRON !== "false") {
 const useHttps = process.env.DEV_HTTPS !== "false";
 const httpsOptions = useHttps ? loadDevHttpsOptions() : null;
 
+function logLedgerStartup() {
+  try {
+    const count = readLocalDonations().length;
+    console.log(`[ledger] DATA_DIR=${DATA_DIR} file=${CSV_LEDGER} rows=${count}`);
+  } catch (error) {
+    console.warn("[ledger] startup check failed:", error.message);
+  }
+}
+
 if (httpsOptions) {
   https.createServer(httpsOptions, app).listen(PORT, () => {
     console.log(`Mulatiwa Foundation listening on https://localhost:${PORT}`);
     console.log("Accept the self-signed certificate warning once, then open /donate.html");
+    logLedgerStartup();
   });
 } else {
   http.createServer(app).listen(PORT, () => {
@@ -370,5 +389,6 @@ if (httpsOptions) {
         "Cybersource requires HTTPS targetOrigins. Add server/certs or set TARGET_ORIGINS to your HTTPS deploy URL.",
       );
     }
+    logLedgerStartup();
   });
 }

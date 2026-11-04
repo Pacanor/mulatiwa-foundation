@@ -2,12 +2,26 @@ const { readLocalDonations } = require("./ledger");
 const { formatMoney } = require("./mail");
 const { createReportToken } = require("./report-token");
 
+const TIME_ZONE = "Africa/Lusaka";
+const PRESETS = ["today", "week", "month", "quarter", "year", "custom"];
+
 function escapeHtml(value) {
   return String(value == null ? "" : value)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function zonedYmd(date = new Date(), timeZone = TIME_ZONE) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
 function parseDay(value, fallback) {
@@ -28,11 +42,80 @@ function startOfDayUtc(date) {
   return start;
 }
 
-function defaultRange() {
-  const to = new Date();
-  const from = new Date(to);
-  from.setUTCDate(from.getUTCDate() - 29);
-  return { from: startOfDayUtc(from), to: endOfDayUtc(to) };
+function addDaysYmd(ymd, days) {
+  const date = new Date(`${ymd}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function weekdayInZone(date = new Date(), timeZone = TIME_ZONE) {
+  // 0 Sun … 6 Sat in the given zone
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(date);
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(label);
+}
+
+function rangeForPreset(preset, now = new Date()) {
+  const today = zonedYmd(now);
+  const [year, month] = today.split("-").map(Number);
+
+  if (preset === "today") {
+    return { from: startOfDayUtc(parseDay(today)), to: endOfDayUtc(parseDay(today)), fromValue: today, toValue: today };
+  }
+
+  if (preset === "week") {
+    const dow = weekdayInZone(now); // 0 Sun
+    const daysFromMonday = (dow + 6) % 7;
+    const fromValue = addDaysYmd(today, -daysFromMonday);
+    return {
+      from: startOfDayUtc(parseDay(fromValue)),
+      to: endOfDayUtc(parseDay(today)),
+      fromValue,
+      toValue: today,
+    };
+  }
+
+  if (preset === "month") {
+    const fromValue = `${year}-${String(month).padStart(2, "0")}-01`;
+    return {
+      from: startOfDayUtc(parseDay(fromValue)),
+      to: endOfDayUtc(parseDay(today)),
+      fromValue,
+      toValue: today,
+    };
+  }
+
+  if (preset === "quarter") {
+    const quarterStartMonth = Math.floor((month - 1) / 3) * 3 + 1;
+    const fromValue = `${year}-${String(quarterStartMonth).padStart(2, "0")}-01`;
+    return {
+      from: startOfDayUtc(parseDay(fromValue)),
+      to: endOfDayUtc(parseDay(today)),
+      fromValue,
+      toValue: today,
+    };
+  }
+
+  if (preset === "year") {
+    const fromValue = `${year}-01-01`;
+    return {
+      from: startOfDayUtc(parseDay(fromValue)),
+      to: endOfDayUtc(parseDay(today)),
+      fromValue,
+      toValue: today,
+    };
+  }
+
+  // custom fallback: last 30 days including today
+  const fromValue = addDaysYmd(today, -29);
+  return {
+    from: startOfDayUtc(parseDay(fromValue)),
+    to: endOfDayUtc(parseDay(today)),
+    fromValue,
+    toValue: today,
+  };
 }
 
 function previousRange(from, to) {
@@ -87,8 +170,7 @@ function compareTotals(currentTotals, previousTotals) {
       const previous = Number(previousTotals[currency] || 0);
       const diff = Math.round((current - previous) * 100) / 100;
       if (diff === 0) return null;
-      const signed = `${diff > 0 ? "+" : "−"}${formatMoney(Math.abs(diff), currency)}`;
-      return signed;
+      return `${diff > 0 ? "+" : "−"}${formatMoney(Math.abs(diff), currency)}`;
     })
     .filter(Boolean);
 
@@ -103,7 +185,7 @@ function renderRows(rows) {
   return rows
     .map((row) => {
       const when = new Date(row.recorded_at).toLocaleString("en-ZM", {
-        timeZone: "Africa/Lusaka",
+        timeZone: TIME_ZONE,
         dateStyle: "medium",
         timeStyle: "short",
       });
@@ -132,13 +214,27 @@ function renderRows(rows) {
     .join("");
 }
 
-function renderReportPage({ fromInput, toInput, token }) {
-  const defaults = defaultRange();
-  const from = parseDay(fromInput, defaults.from);
-  const to = endOfDayUtc(parseDay(toInput, defaults.to));
-  const fromValue = from.toISOString().slice(0, 10);
-  const toValue = to.toISOString().slice(0, 10);
+function resolveRange({ periodInput, fromInput, toInput }) {
+  const period = PRESETS.includes(periodInput) ? periodInput : "month";
+  if (period === "custom") {
+    const fallback = rangeForPreset("month");
+    const fromValue = fromInput || fallback.fromValue;
+    const toValue = toInput || fallback.toValue;
+    const from = startOfDayUtc(parseDay(fromValue, fallback.from));
+    const to = endOfDayUtc(parseDay(toValue, fallback.to));
+    return { period, from, to, fromValue: from.toISOString().slice(0, 10), toValue: to.toISOString().slice(0, 10) };
+  }
+  const range = rangeForPreset(period);
+  return { period, ...range };
+}
+
+function renderReportPage({ periodInput, fromInput, toInput, token }) {
   const nextToken = createReportToken() || token;
+  const { period, from, to, fromValue, toValue } = resolveRange({
+    periodInput,
+    fromInput,
+    toInput,
+  });
 
   const all = readLocalDonations();
   const rows = filterDonations(all, from, to);
@@ -152,7 +248,20 @@ function renderReportPage({ fromInput, toInput, token }) {
   const approvedCompare = compareCount(current.approved.length, prior.approved.length);
   const failedCompare = compareCount(current.failed.length, prior.failed.length);
   const totalsCompare = compareTotals(current.totals, prior.totals);
-  const previousLabel = `${prev.from.toISOString().slice(0, 10)} → ${prev.to.toISOString().slice(0, 10)}`;
+
+  const presetOptions = [
+    ["today", "Today"],
+    ["week", "This week"],
+    ["month", "This month"],
+    ["quarter", "This quarter"],
+    ["year", "This year"],
+    ["custom", "Custom"],
+  ]
+    .map(
+      ([value, label]) =>
+        `<option value="${value}"${period === value ? " selected" : ""}>${label}</option>`,
+    )
+    .join("");
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -240,14 +349,13 @@ function renderReportPage({ fromInput, toInput, token }) {
       text-transform: uppercase;
     }
     h1 {
-      margin: 0 0 10px;
+      margin: 0 0 28px;
       font-family: Georgia, "Times New Roman", serif;
       color: var(--navy);
       font-size: clamp(2rem, 3.4vw, 2.7rem);
       line-height: 1.1;
       letter-spacing: -0.03em;
     }
-    .lead { margin: 0 0 28px; color: var(--muted); max-width: 42rem; }
     .stats {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -296,11 +404,7 @@ function renderReportPage({ fromInput, toInput, token }) {
       flex-wrap: wrap;
       gap: 14px;
       align-items: end;
-      margin: 0 0 14px;
-      padding: 16px;
-      border-radius: 18px;
-      background: rgba(18, 58, 109, 0.04);
-      border: 1px solid var(--line);
+      margin: 0 0 22px;
     }
     .filters label {
       display: flex;
@@ -312,8 +416,10 @@ function renderReportPage({ fromInput, toInput, token }) {
       text-transform: uppercase;
       color: var(--muted);
     }
+    .filters select,
     .filters input[type="date"] {
       min-height: 48px;
+      min-width: 160px;
       border: 1px solid rgba(18, 58, 109, 0.18);
       border-radius: 14px;
       padding: 0 14px;
@@ -321,23 +427,8 @@ function renderReportPage({ fromInput, toInput, token }) {
       color: var(--ink);
       background: #fff;
     }
-    .filters button {
-      min-height: 48px;
-      border: 0;
-      border-radius: 999px;
-      padding: 0 22px;
-      background: var(--gold);
-      color: var(--navy);
-      font: inherit;
-      font-weight: 800;
-      cursor: pointer;
-    }
-    .filters button:hover { filter: brightness(0.98); }
-    .period-hint {
-      margin: 0 0 22px;
-      color: var(--muted);
-      font-size: 13px;
-    }
+    .filters select { min-width: 180px; cursor: pointer; }
+    .custom-dates { display: ${period === "custom" ? "flex" : "none"}; flex-wrap: wrap; gap: 14px; }
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
@@ -404,9 +495,6 @@ function renderReportPage({ fromInput, toInput, token }) {
     <section class="panel">
       <p class="eyebrow">Staff only</p>
       <h1>Donations log</h1>
-      <p class="lead">
-        Approved and unsuccessful donations for the selected period. This page is not linked from the public site.
-      </p>
 
       <div class="stats">
         <div class="stat stat-ok">
@@ -426,13 +514,19 @@ function renderReportPage({ fromInput, toInput, token }) {
         </div>
       </div>
 
-      <form class="filters" method="get" action="/internal/giving">
+      <form class="filters" id="period-form" method="get" action="/internal/giving">
         <input type="hidden" name="t" value="${escapeHtml(nextToken)}" />
-        <label>From<input type="date" name="from" value="${escapeHtml(fromValue)}" required /></label>
-        <label>To<input type="date" name="to" value="${escapeHtml(toValue)}" required /></label>
-        <button type="submit">Update period</button>
+        <label>
+          Period
+          <select name="period" id="period-select">
+            ${presetOptions}
+          </select>
+        </label>
+        <div class="custom-dates" id="custom-dates">
+          <label>From<input type="date" name="from" id="from-input" value="${escapeHtml(fromValue)}" /></label>
+          <label>To<input type="date" name="to" id="to-input" value="${escapeHtml(toValue)}" /></label>
+        </div>
       </form>
-      <p class="period-hint">Compared with the previous equal period (${escapeHtml(previousLabel)}).</p>
 
       <div class="table-wrap">
         <table>
@@ -454,16 +548,46 @@ function renderReportPage({ fromInput, toInput, token }) {
       <p class="footnote">Link access expires after about 7 days. Open a fresh link from a staff donation email when needed.</p>
     </section>
   </div>
+  <script>
+    (function () {
+      var form = document.getElementById("period-form");
+      var select = document.getElementById("period-select");
+      var custom = document.getElementById("custom-dates");
+      var fromInput = document.getElementById("from-input");
+      var toInput = document.getElementById("to-input");
+      if (!form || !select) return;
+
+      function syncCustomVisibility() {
+        var isCustom = select.value === "custom";
+        custom.style.display = isCustom ? "flex" : "none";
+        fromInput.required = isCustom;
+        toInput.required = isCustom;
+      }
+
+      select.addEventListener("change", function () {
+        syncCustomVisibility();
+        if (select.value !== "custom") form.submit();
+      });
+      fromInput.addEventListener("change", function () {
+        if (select.value === "custom" && fromInput.value && toInput.value) form.submit();
+      });
+      toInput.addEventListener("change", function () {
+        if (select.value === "custom" && fromInput.value && toInput.value) form.submit();
+      });
+      syncCustomVisibility();
+    })();
+  </script>
 </body>
 </html>`;
 }
 
 module.exports = {
   renderReportPage,
-  defaultRange,
+  rangeForPreset,
   filterDonations,
   previousRange,
   summarize,
   compareCount,
   compareTotals,
+  PRESETS,
 };
