@@ -86,9 +86,8 @@ async function createCaptureContext({
   const resourcePath = "/uc/v1/sessions";
   const bodyObject = {
     targetOrigins,
-    // PANENTRY only for v1 UX: Trigger opens card entry directly (no "Checkout with card" step).
-    // Apple Pay / Google Pay can return later as separate launch buttons once domains are verified.
-    allowedPaymentTypes: ["PANENTRY"],
+    // Card opens via Trigger (no "Checkout with card" step). Wallets mount as separate buttons.
+    allowedPaymentTypes: ["PANENTRY", "APPLEPAY", "GOOGLEPAY"],
     allowedCardNetworks: ["VISA", "MASTERCARD"],
     country: "ZM",
     locale: "en_US",

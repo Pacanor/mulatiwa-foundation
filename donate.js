@@ -31,11 +31,14 @@
   let selectedAmount = PRESETS.USD[DEFAULT_PRESET_INDEX];
   let activeClient = null;
   let activeCheckout = null;
+  let walletButtons = [];
   let checkoutGeneration = 0;
   let stepTransitionTimer = null;
   let stepResizeObserver = null;
   const stage = root.querySelector(".donate-stage") || root;
+  const walletsEl = root.querySelector("[data-wallets]");
   const steps = [amountStep, checkoutStep, thanksStep, declinedStep].filter(Boolean);
+  const HEIGHT_BUFFER = 16;
 
   const formatAmount = (value, code = currency) => {
     const number = Number(value);
@@ -66,12 +69,9 @@
   const measureActiveStepHeight = () => {
     const active = steps.find((step) => step.classList.contains("is-active"));
     if (!active || !stage) return;
-    // Checkout embeds Cybersource UI that must not be clipped by a fixed stage height.
-    if (root.classList.contains("is-checkout")) {
-      stage.style.height = "auto";
-      return;
-    }
-    stage.style.height = `${active.offsetHeight}px`;
+    // Measure the live content, then add a small comfort buffer — no oversized min-heights.
+    const nextHeight = Math.ceil(active.getBoundingClientRect().height + HEIGHT_BUFFER);
+    stage.style.height = `${Math.max(nextHeight, 1)}px`;
   };
 
   const watchActiveStepSize = () => {
@@ -83,17 +83,15 @@
       measureActiveStepHeight();
     });
     stepResizeObserver.observe(active);
-    const embed = active.querySelector(".uc-embed");
-    if (embed) stepResizeObserver.observe(embed);
   };
 
   const setStep = (name) => {
     const next = steps.find((step) => step.dataset.step === name);
     if (!next) return;
 
-    if (stage && !stage.style.height && name !== "checkout") {
+    if (stage && !stage.style.height) {
       const current = steps.find((step) => step.classList.contains("is-active")) || next;
-      stage.style.height = `${current.offsetHeight}px`;
+      stage.style.height = `${Math.ceil(current.getBoundingClientRect().height + HEIGHT_BUFFER)}px`;
     }
 
     steps.forEach((step) => {
@@ -106,7 +104,6 @@
 
     root.classList.toggle("is-celebrating", name === "thanks");
     root.classList.toggle("is-soft-fail", name === "declined");
-    root.classList.toggle("is-checkout", name === "checkout");
 
     if (stepTransitionTimer) window.clearTimeout(stepTransitionTimer);
     // Allow the incoming step to paint, then ease the card height to match.
@@ -119,7 +116,7 @@
     stepTransitionTimer = window.setTimeout(() => {
       measureActiveStepHeight();
       watchActiveStepSize();
-    }, 460);
+    }, 420);
   };
 
   const showApprovedResult = ({ amount, currency: code }) => {
@@ -229,14 +226,35 @@
       document.head.appendChild(script);
     });
 
+  const ensureUcPortal = () => {
+    let portal = document.getElementById("uc-portal");
+    if (!portal) {
+      portal = document.createElement("div");
+      portal.id = "uc-portal";
+      document.body.appendChild(portal);
+    }
+    return portal;
+  };
+
   const clearCheckoutContainers = () => {
-    const host = document.getElementById("ucPaymentContainer");
-    const screen = document.getElementById("ucPaymentScreen");
-    if (host) host.innerHTML = "";
-    if (screen) screen.innerHTML = "";
+    const portal = document.getElementById("uc-portal");
+    if (portal) portal.innerHTML = "";
+    const apple = document.getElementById("ucApplePay");
+    const google = document.getElementById("ucGooglePay");
+    if (apple) apple.innerHTML = "";
+    if (google) google.innerHTML = "";
+    if (walletsEl) walletsEl.hidden = true;
   };
 
   const destroyCheckout = () => {
+    walletButtons.forEach((button) => {
+      try {
+        button?.destroy?.();
+      } catch {
+        // Ignore destroy failures when resetting
+      }
+    });
+    walletButtons = [];
     try {
       activeCheckout?.destroy?.();
     } catch {
@@ -249,6 +267,43 @@
     }
     activeCheckout = null;
     activeClient = null;
+  };
+
+  const startWalletButtons = (client) => {
+    if (!client || typeof client.createButton !== "function") return [];
+    const slots = [
+      ["APPLEPAY", "ucApplePay"],
+      ["GOOGLEPAY", "ucGooglePay"],
+    ];
+    const pending = [];
+    let mounted = 0;
+    slots.forEach(([type, id]) => {
+      const slot = document.getElementById(id);
+      if (!slot) return;
+      try {
+        const button = client.createButton(type, { autoProcessing: true });
+        walletButtons.push(button);
+        // Resolve only on a completed wallet payment. Mount failures must not
+        // reject the card Trigger path racing alongside these promises.
+        pending.push(
+          new Promise((resolve) => {
+            Promise.resolve(button.mount(`#${id}`))
+              .then(resolve)
+              .catch(() => {
+                slot.innerHTML = "";
+              });
+          }),
+        );
+        mounted += 1;
+      } catch {
+        slot.innerHTML = "";
+      }
+    });
+    if (walletsEl) {
+      walletsEl.hidden = mounted === 0;
+      measureActiveStepHeight();
+    }
+    return pending;
   };
 
   const resetToAmount = () => {
@@ -381,24 +436,26 @@
       }
       measureActiveStepHeight();
 
-      // Embedded checkout keeps the card form inside our panel (sidebar was clipped).
+      // Card uses Trigger → sidebar on a body portal (avoids clipping). Wallets mount in-card.
       activeClient = await window.VAS.UnifiedCheckout(payload.capture_context);
       if (generation !== checkoutGeneration) return;
-      activeCheckout = await activeClient.createCheckout({
+
+      const walletPending = startWalletButtons(activeClient);
+      activeCheckout = activeClient.createTrigger("PANENTRY", {
+        displayMode: "sidebar",
         autoProcessing: true,
       });
       if (generation !== checkoutGeneration) return;
 
       if (statusEl) {
         statusEl.hidden = false;
-        statusEl.textContent = "Complete your gift in the secure payment form below.";
+        statusEl.textContent = "Complete your gift in the secure payment window.";
       }
       measureActiveStepHeight();
 
-      const mountResponse = await activeCheckout.mount({
-        paymentSelection: "#ucPaymentContainer",
-        paymentScreen: "#ucPaymentScreen",
-      });
+      ensureUcPortal();
+      const cardPending = activeCheckout.mount("#uc-portal");
+      const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
       measureActiveStepHeight();
       const completeResponse = await finalizeCheckoutResult(mountResponse);

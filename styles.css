@@ -1577,30 +1577,21 @@ h2 {
     border-color 420ms ease;
 }
 
-.donate-panel.is-checkout {
-  overflow: visible;
-}
-
 .donate-stage {
   position: relative;
   overflow: hidden;
   transition: height 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.donate-panel.is-checkout .donate-stage {
-  overflow: visible;
-  height: auto !important;
-}
-
 .donate-step {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transform: translateY(14px) scale(0.985);
+  transform: translateY(10px);
   transition:
-    opacity 320ms ease,
-    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 0ms linear 320ms;
+    opacity 280ms ease,
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0ms linear 280ms;
 }
 
 .donate-step.is-active {
@@ -1610,8 +1601,8 @@ h2 {
   pointer-events: auto;
   transform: none;
   transition:
-    opacity 380ms ease 40ms,
-    transform 420ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 320ms ease 30ms,
+    transform 380ms cubic-bezier(0.22, 1, 0.36, 1),
     visibility 0ms linear 0ms;
 }
 
@@ -1621,8 +1612,23 @@ h2 {
   width: 100%;
 }
 
-.donate-panel.is-checkout .donate-step:not(.is-active) {
+#uc-portal {
+  position: relative;
+  z-index: 10000;
+}
+
+.donate-wallets {
+  display: grid;
+  gap: 10px;
+  margin: 4px 0 2px;
+}
+
+.donate-wallet-slot:empty {
   display: none;
+}
+
+.donate-wallet-slot:not(:empty) {
+  min-height: 48px;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1788,25 +1794,6 @@ h2 {
   color: var(--muted);
   font-size: 0.98rem;
   line-height: 1.55;
-}
-
-.uc-embed {
-  display: grid;
-  gap: 12px;
-  margin-top: 4px;
-  min-height: 420px;
-}
-
-.uc-payment-host,
-.uc-payment-screen {
-  min-height: 0;
-  width: 100%;
-}
-
-.uc-payment-screen {
-  min-height: 360px;
-  border-radius: 18px;
-  overflow: visible;
 }
 
 .donate-status {
