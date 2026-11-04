@@ -242,7 +242,7 @@ app.post("/api/donate/complete", async (req, res) => {
       return res.status(400).json({ error: "Invalid donation details." });
     }
 
-    const normalizedStatus =
+    const requestedStatus =
       status === "approved" ? "approved" : status === "declined" ? "declined" : "failed";
 
     const donation = await enrichDonation({
@@ -250,7 +250,7 @@ app.post("/api/donate/complete", async (req, res) => {
       currency,
       reference: req.body?.reference || "",
       resultJwt: req.body?.result_jwt || "",
-      status: normalizedStatus,
+      status: requestedStatus,
       errorMessage: req.body?.error_message || "",
     });
 
@@ -269,9 +269,10 @@ app.post("/api/donate/complete", async (req, res) => {
 
     await recordDonation(donation);
 
+    const finalStatus = String(donation.status || requestedStatus).toLowerCase();
     const isSeed = String(donation.reference || "").startsWith("SEED-");
     if (!isSeed) {
-      if (normalizedStatus === "approved") {
+      if (finalStatus === "approved") {
         await sendDonationEmails(donation);
       } else {
         await sendFailedDonationEmail(donation);
@@ -281,9 +282,9 @@ app.post("/api/donate/complete", async (req, res) => {
     return res.json({
       ok: true,
       recorded: true,
-      donor_email_sent: Boolean(donation.email) && !isSeed,
+      donor_email_sent: Boolean(donation.email) && !isSeed && finalStatus === "approved",
       reference: donation.reference,
-      status: normalizedStatus,
+      status: finalStatus,
     });
   } catch (error) {
     console.error("[donate/complete]", error.message);

@@ -1,4 +1,4 @@
-const { getHost } = require("./cybersource");
+const { getHost, createPaymentWithTransientToken } = require("./cybersource");
 const crypto = require("crypto");
 
 function decodeJwtPayload(jwt) {
@@ -9,6 +9,19 @@ function decodeJwtPayload(jwt) {
   } catch {
     return null;
   }
+}
+
+function isTransientTokenPayload(payload) {
+  if (!payload || typeof payload !== "object") return false;
+  const type = String(payload.type || "");
+  const iss = String(payload.iss || "");
+  if (type.startsWith("gda")) return true;
+  if (/Flex/i.test(iss)) return true;
+  // Completed UC payment JWTs usually expose a processing/status block.
+  if (payload.content?.processingInformation || payload.content?.status || payload.status) {
+    return false;
+  }
+  return Boolean(payload.jti);
 }
 
 function createSignatureHeader({
@@ -102,6 +115,23 @@ function pickDonorFromDetails(details, payload) {
   return { name, email: String(email || "").trim() };
 }
 
+function paymentStatusFromPts(payload) {
+  const status = String(payload?.status || "").toUpperCase();
+  if (
+    status === "AUTHORIZED" ||
+    status === "PARTIAL_AUTHORIZED" ||
+    status === "PENDING" ||
+    status === "AUTHORIZED_PENDING_REVIEW" ||
+    status === "PENDING_REVIEW"
+  ) {
+    return "approved";
+  }
+  if (status === "DECLINED" || status === "AUTHORIZED_RISK_DECLINED") {
+    return "declined";
+  }
+  return "failed";
+}
+
 async function enrichDonation({
   amount,
   currency,
@@ -111,8 +141,57 @@ async function enrichDonation({
   errorMessage = "",
 }) {
   const payload = resultJwt ? decodeJwtPayload(resultJwt) : null;
-  const jti = payload?.jti || (typeof reference === "string" ? reference : null);
+  let jti = payload?.jti || (typeof reference === "string" ? reference : null);
   let details = null;
+  let normalizedStatus = status || "approved";
+  let normalizedError = errorMessage || "";
+  let paymentId = null;
+
+  // Client often returns a Flex transient token even when autoProcessing was requested.
+  // Capture server-side so the gift actually appears in Business Center.
+  if (
+    resultJwt &&
+    isTransientTokenPayload(payload) &&
+    String(normalizedStatus).toLowerCase() === "approved" &&
+    !String(reference || "").startsWith("SEED-")
+  ) {
+    try {
+      const payment = await createPaymentWithTransientToken({
+        merchantId: process.env.MERCHANT_ID,
+        keyId: process.env.CYBS_KEY_ID,
+        secretKey: process.env.CYBS_SECRET_KEY,
+        env: process.env.CYBS_ENV === "production" ? "production" : "test",
+        amount: String(amount),
+        currency: String(currency).toUpperCase(),
+        transientTokenJwt: resultJwt,
+        referenceCode: `MF-${Date.now()}`,
+      });
+      paymentId = payment?.id || payment?.reconciliationId || null;
+      normalizedStatus = paymentStatusFromPts(payment);
+      if (normalizedStatus !== "approved") {
+        normalizedError =
+          payment?.errorInformation?.message ||
+          payment?.message ||
+          payment?.status ||
+          "Payment was not approved";
+      }
+      console.log(
+        "[donations] captured transient token via PTS",
+        paymentId,
+        payment?.status,
+      );
+    } catch (error) {
+      console.error("[donations] PTS capture failed:", error.message, error.details || "");
+      normalizedStatus = "failed";
+      const detail =
+        error.payload?.message ||
+        error.payload?.reason ||
+        error.payload?.errorInformation?.message ||
+        error.message;
+      normalizedError = String(detail || "Payment capture failed");
+    }
+  }
+
   try {
     details = await fetchPaymentDetails(jti);
   } catch (error) {
@@ -134,14 +213,15 @@ async function enrichDonation({
     currency: String(currencyFromDetails || currency).toUpperCase(),
     name: donor.name,
     email: donor.email,
-    reference: jti || reference || "",
+    reference: paymentId || jti || reference || "",
     whenIso: new Date().toISOString(),
-    status: status || "approved",
-    error_message: errorMessage || "",
+    status: normalizedStatus || "approved",
+    error_message: normalizedError || "",
   };
 }
 
 module.exports = {
   decodeJwtPayload,
+  isTransientTokenPayload,
   enrichDonation,
 };

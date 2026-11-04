@@ -85,22 +85,23 @@
     resultJwt,
     errorMessage,
   }) => {
-    try {
-      await fetch("/api/donate/complete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          status,
-          amount,
-          currency,
-          reference,
-          result_jwt: resultJwt || "",
-          error_message: errorMessage || "",
-        }),
-      });
-    } catch (error) {
-      console.error("[donate] notify failed", error);
+    const response = await fetch("/api/donate/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        status,
+        amount,
+        currency,
+        reference,
+        result_jwt: resultJwt || "",
+        error_message: errorMessage || "",
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body.error || "Could not confirm donation with the server.");
     }
+    return body;
   };
 
   const updateImpact = () => {
@@ -219,6 +220,20 @@
     }
   };
 
+  const isTransientToken = (result) => {
+    if (typeof result !== "string") return false;
+    const payload = decodeJwtPayload(result);
+    if (!payload) return false;
+    const type = String(payload.type || "");
+    const iss = String(payload.iss || "");
+    if (type.startsWith("gda")) return true;
+    if (/Flex/i.test(iss)) return true;
+    if (payload.content?.processingInformation || payload.content?.status || payload.status) {
+      return false;
+    }
+    return Boolean(payload.jti);
+  };
+
   const extractReference = (result) => {
     if (!result) return null;
     if (typeof result === "string") {
@@ -227,6 +242,7 @@
         payload?.transactionId ||
         payload?.id ||
         payload?.content?.transactionId ||
+        payload?.content?.id ||
         payload?.jti ||
         result.slice(0, 24) + "…"
       );
@@ -242,6 +258,20 @@
       );
     }
     return null;
+  };
+
+  const finalizeCheckoutResult = async (mountResult) => {
+    let result = mountResult;
+    // When autoProcessing does not orchestrate CAPTURE, mount() returns a Flex
+    // transient token. Complete explicitly so Cybersource records the sale.
+    if (isTransientToken(result) && activeCheckout && typeof activeCheckout.complete === "function") {
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Confirming your gift with the bank…";
+      }
+      result = await activeCheckout.complete(result);
+    }
+    return result;
   };
 
   const startCheckout = async () => {
@@ -302,22 +332,36 @@
         statusEl.textContent = "Complete your gift in the secure payment window.";
       }
 
-      const completeResponse = await activeCheckout.mount("#ucPaymentContainer");
+      const mountResponse = await activeCheckout.mount("#ucPaymentContainer");
+      const completeResponse = await finalizeCheckoutResult(mountResponse);
       const reference = extractReference(completeResponse);
+      const resultJwt = typeof completeResponse === "string" ? completeResponse : "";
 
-      destroyCheckout();
-      clearCheckoutContainers();
-      showApprovedResult({
-        amount: payload.amount,
-        currency: payload.currency,
-      });
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Recording your gift…";
+      }
 
-      void notifyComplete({
+      // Server authoritatively captures when UC only returns a Flex transient token.
+      const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
         currency: payload.currency,
         reference,
-        resultJwt: typeof completeResponse === "string" ? completeResponse : "",
+        resultJwt,
+      });
+
+      destroyCheckout();
+      clearCheckoutContainers();
+
+      if (recorded?.status && recorded.status !== "approved") {
+        setStep("declined");
+        return;
+      }
+
+      showApprovedResult({
+        amount: payload.amount,
+        currency: payload.currency,
       });
     } catch (error) {
       console.error("[donate]", error);
@@ -342,14 +386,18 @@
 
       if (declined) {
         setStep("declined");
-        void notifyComplete({
-          status: "declined",
-          amount,
-          currency,
-          reference: "",
-          resultJwt: "",
-          errorMessage: rawMessage || String(reason || ""),
-        });
+        try {
+          await notifyComplete({
+            status: "declined",
+            amount,
+            currency,
+            reference: "",
+            resultJwt: "",
+            errorMessage: rawMessage || String(reason || ""),
+          });
+        } catch (notifyError) {
+          console.error("[donate] declined notify failed", notifyError);
+        }
         return;
       }
 
@@ -361,14 +409,18 @@
           ? rawMessage
           : "We're having some trouble proceeding right now. Please try again later.";
 
-      void notifyComplete({
-        status: "failed",
-        amount,
-        currency,
-        reference: "",
-        resultJwt: "",
-        errorMessage: rawMessage || String(reason || friendly),
-      });
+      try {
+        await notifyComplete({
+          status: "failed",
+          amount,
+          currency,
+          reference: "",
+          resultJwt: "",
+          errorMessage: rawMessage || String(reason || friendly),
+        });
+      } catch (notifyError) {
+        console.error("[donate] failed notify failed", notifyError);
+      }
 
       if (checkoutStep && !checkoutStep.hidden) {
         showError(checkoutError, friendly);

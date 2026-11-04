@@ -185,7 +185,85 @@ async function createCaptureContext({
   };
 }
 
+async function createPaymentWithTransientToken({
+  merchantId,
+  keyId,
+  secretKey,
+  env,
+  amount,
+  currency,
+  transientTokenJwt,
+  referenceCode,
+}) {
+  const host = getHost(env);
+  const resourcePath = "/pts/v2/payments";
+  const bodyObject = {
+    clientReferenceInformation: {
+      code: referenceCode || `MF-${Date.now()}`,
+    },
+    processingInformation: {
+      capture: true,
+      commerceIndicator: "internet",
+    },
+    tokenInformation: {
+      transientTokenJwt,
+    },
+    orderInformation: {
+      amountDetails: {
+        totalAmount: amount,
+        currency,
+      },
+    },
+  };
+
+  const body = JSON.stringify(bodyObject);
+  const date = new Date().toUTCString();
+  const digest = createDigest(body);
+  const signature = createSignatureHeader({
+    method: "POST",
+    resourcePath,
+    host,
+    date,
+    digest,
+    merchantId,
+    keyId,
+    secretKey,
+  });
+
+  const response = await fetch(`https://${host}${resourcePath}`, {
+    method: "POST",
+    headers: {
+      Host: host,
+      Date: date,
+      Digest: digest,
+      Signature: signature,
+      "v-c-merchant-id": merchantId,
+      "Content-Type": "application/json",
+    },
+    body,
+  });
+
+  const raw = await response.text();
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const error = new Error(`Cybersource payment failed (${response.status})`);
+    error.status = response.status;
+    error.details = raw;
+    error.payload = parsed;
+    throw error;
+  }
+
+  return parsed;
+}
+
 module.exports = {
   createCaptureContext,
+  createPaymentWithTransientToken,
   getHost,
 };
