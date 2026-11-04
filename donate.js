@@ -226,24 +226,13 @@
       document.head.appendChild(script);
     });
 
-  const ensureUcPortal = () => {
-    let portal = document.getElementById("uc-portal");
-    if (!portal) {
-      portal = document.createElement("div");
-      portal.id = "uc-portal";
-      document.body.appendChild(portal);
-    }
-    return portal;
-  };
-
   const clearCheckoutContainers = () => {
-    const portal = document.getElementById("uc-portal");
-    if (portal) portal.innerHTML = "";
     const apple = document.getElementById("ucApplePay");
     const google = document.getElementById("ucGooglePay");
     if (apple) apple.innerHTML = "";
     if (google) google.innerHTML = "";
     if (walletsEl) walletsEl.hidden = true;
+    document.body.classList.remove("uc-open");
   };
 
   const destroyCheckout = () => {
@@ -373,17 +362,14 @@
   };
 
   const finalizeCheckoutResult = async (mountResult) => {
-    let result = mountResult;
-    // When autoProcessing does not orchestrate CAPTURE, mount() returns a Flex
-    // transient token. Complete explicitly so Cybersource records the sale.
-    if (isTransientToken(result) && activeCheckout && typeof activeCheckout.complete === "function") {
-      if (statusEl) {
-        statusEl.hidden = false;
-        statusEl.textContent = "Confirming your gift with the bank…";
-      }
-      result = await activeCheckout.complete(result);
+    // autoProcessing: true means mount() already finished UC orchestration.
+    // Calling trigger.complete() throws: "cannot be called when autoProcessing is enabled".
+    // If mount still returns a Flex transient token, /api/donate/complete captures via PTS.
+    if (isTransientToken(mountResult) && statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Confirming your gift with the bank…";
     }
-    return result;
+    return mountResult;
   };
 
   const startCheckout = async () => {
@@ -453,10 +439,13 @@
       }
       measureActiveStepHeight();
 
-      ensureUcPortal();
-      const cardPending = activeCheckout.mount("#uc-portal");
+      // Omit the mount target so Unified Checkout owns the fixed sidebar overlay
+      // (mounting into a body div was dumping the form below the footer).
+      document.body.classList.add("uc-open");
+      const cardPending = activeCheckout.mount();
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
+      document.body.classList.remove("uc-open");
       measureActiveStepHeight();
       const completeResponse = await finalizeCheckoutResult(mountResponse);
       if (generation !== checkoutGeneration) return;

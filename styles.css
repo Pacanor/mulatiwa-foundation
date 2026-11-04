@@ -1612,9 +1612,8 @@ h2 {
   width: 100%;
 }
 
-#uc-portal {
-  position: relative;
-  z-index: 10000;
+body.uc-open {
+  overflow: hidden;
 }
 
 .donate-wallets {
