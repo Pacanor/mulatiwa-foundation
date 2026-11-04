@@ -1,9 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 
-const DATA_DIR = process.env.DATA_DIR
-  ? path.resolve(process.env.DATA_DIR)
-  : path.join(__dirname, "..", "data");
+function resolveDataDir() {
+  if (process.env.DATA_DIR) {
+    return path.resolve(process.env.DATA_DIR);
+  }
+
+  // Prefer an App Platform volume mount when present.
+  const volumeDir = "/data";
+  try {
+    if (fs.existsSync(volumeDir)) {
+      fs.accessSync(volumeDir, fs.constants.W_OK);
+      return volumeDir;
+    }
+  } catch {
+    // fall through to local/ephemeral data dir
+  }
+
+  return path.join(__dirname, "..", "data");
+}
+
+const DATA_DIR = resolveDataDir();
 const CSV_LEDGER = path.join(DATA_DIR, "donations.csv");
 const LEGACY_JSONL = path.join(DATA_DIR, "donations.jsonl");
 
