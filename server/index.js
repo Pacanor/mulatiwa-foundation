@@ -10,9 +10,13 @@ const { enrichDonation } = require("./donations");
 const { recordDonation, ledgerReady } = require("./ledger");
 const {
   sendDonationEmails,
+  sendFailedDonationEmail,
   donorThankYouHtml,
+  donorFailedHtml,
   staffNotifyHtml,
 } = require("./mail");
+const { verifyReportToken } = require("./report-token");
+const { renderReportPage } = require("./report-page");
 const { runWeeklyReport } = require("./weekly-report");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -210,15 +214,16 @@ app.post("/api/donate/complete", async (req, res) => {
       return res.status(400).json({ error: "Invalid donation details." });
     }
 
-    if (status !== "approved") {
-      return res.json({ ok: true, recorded: false });
-    }
+    const normalizedStatus =
+      status === "approved" ? "approved" : status === "declined" ? "declined" : "failed";
 
     const donation = await enrichDonation({
       amount,
       currency,
       reference: req.body?.reference || "",
       resultJwt: req.body?.result_jwt || "",
+      status: normalizedStatus,
+      errorMessage: req.body?.error_message || "",
     });
 
     // Prefer client-provided contact fields when Payment Details is unavailable.
@@ -226,13 +231,19 @@ app.post("/api/donate/complete", async (req, res) => {
     if (!donation.name && req.body?.name) donation.name = String(req.body.name).trim();
 
     await recordDonation(donation);
-    await sendDonationEmails(donation);
+
+    if (normalizedStatus === "approved") {
+      await sendDonationEmails(donation);
+    } else {
+      await sendFailedDonationEmail(donation);
+    }
 
     return res.json({
       ok: true,
       recorded: true,
       donor_email_sent: Boolean(donation.email),
       reference: donation.reference,
+      status: normalizedStatus,
     });
   } catch (error) {
     console.error("[donate/complete]", error.message);
@@ -240,6 +251,26 @@ app.post("/api/donate/complete", async (req, res) => {
       error: "We're having some trouble proceeding right now. Please try again later.",
     });
   }
+});
+
+// Obscure staff giving log — requires signed ?t= token from donation emails.
+app.get("/internal/giving", (req, res) => {
+  const token = String(req.query.t || "");
+  if (!verifyReportToken(token)) {
+    return res.redirect(302, "/");
+  }
+
+  res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+  res.set("Cache-Control", "no-store");
+  res
+    .type("html")
+    .send(
+      renderReportPage({
+        fromInput: req.query.from,
+        toInput: req.query.to,
+        token,
+      }),
+    );
 });
 
 // Browser preview of branded donation emails (no send).
@@ -252,10 +283,12 @@ app.get("/api/donate/email-preview", (req, res) => {
     email: req.query.email || "papiasb@gmail.com",
     reference: req.query.reference || "PREVIEW-REF",
     whenIso: new Date().toISOString(),
+    error_message: req.query.error || "The issuing bank declined this payment.",
   };
 
-  const html =
-    kind === "staff" ? staffNotifyHtml(donation) : donorThankYouHtml(donation);
+  let html = donorThankYouHtml(donation);
+  if (kind === "staff") html = staffNotifyHtml(donation);
+  if (kind === "failed") html = donorFailedHtml(donation);
   res.type("html").send(html);
 });
 

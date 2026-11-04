@@ -77,7 +77,14 @@
     setStep("thanks");
   };
 
-  const notifyComplete = async ({ status, amount, currency, reference, resultJwt }) => {
+  const notifyComplete = async ({
+    status,
+    amount,
+    currency,
+    reference,
+    resultJwt,
+    errorMessage,
+  }) => {
     try {
       await fetch("/api/donate/complete", {
         method: "POST",
@@ -88,6 +95,7 @@
           currency,
           reference,
           result_jwt: resultJwt || "",
+          error_message: errorMessage || "",
         }),
       });
     } catch (error) {
@@ -340,6 +348,7 @@
           currency,
           reference: "",
           resultJwt: "",
+          errorMessage: rawMessage || String(reason || ""),
         });
         return;
       }
@@ -351,6 +360,15 @@
         )
           ? rawMessage
           : "We're having some trouble proceeding right now. Please try again later.";
+
+      void notifyComplete({
+        status: "failed",
+        amount,
+        currency,
+        reference: "",
+        resultJwt: "",
+        errorMessage: rawMessage || String(reason || friendly),
+      });
 
       if (checkoutStep && !checkoutStep.hidden) {
         showError(checkoutError, friendly);

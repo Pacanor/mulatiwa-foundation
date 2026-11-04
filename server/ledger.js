@@ -15,6 +15,7 @@ const CSV_HEADERS = [
   "donor_name",
   "donor_email",
   "reference",
+  "error_message",
 ];
 
 function ensureDataDir() {
@@ -39,6 +40,20 @@ function ensureCsvHeader() {
   ensureDataDir();
   if (!fs.existsSync(CSV_LEDGER)) {
     fs.writeFileSync(CSV_LEDGER, `${CSV_HEADERS.join(",")}\n`, "utf8");
+    return;
+  }
+
+  // Migrate older ledgers that predate error_message.
+  const existing = fs.readFileSync(CSV_LEDGER, "utf8");
+  const firstLine = existing.split(/\r?\n/)[0] || "";
+  if (firstLine && !firstLine.split(",").includes("error_message")) {
+    const lines = existing.split(/\r?\n/);
+    lines[0] = CSV_HEADERS.join(",");
+    const rest = lines.slice(1).map((line) => {
+      if (!line.trim()) return line;
+      return `${line},`;
+    });
+    fs.writeFileSync(CSV_LEDGER, [lines[0], ...rest].join("\n"), "utf8");
   }
 }
 
@@ -87,6 +102,7 @@ async function recordDonation(donation) {
     donor_name: donation.name || "",
     donor_email: donation.email || "",
     reference: donation.reference || "",
+    error_message: donation.error_message || "",
   };
 
   appendCsv(row);

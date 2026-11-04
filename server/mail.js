@@ -1,3 +1,5 @@
+const { buildReportUrl } = require("./report-token");
+
 const SITE_URL =
   process.env.PUBLIC_SITE_URL ||
   "https://mulatiwa-foundation-2-qaz68.ondigitalocean.app";
@@ -13,6 +15,7 @@ const CREAM = "#f6f3ea";
 const PAPER = "#fffdf8";
 const INK = "#17212b";
 const MUTED = "#66727e";
+const FAIL = "#9b1b1b";
 
 function escapeHtml(value) {
   return String(value == null ? "" : value)
@@ -29,6 +32,36 @@ function formatMoney(amount, currency) {
     maximumFractionDigits: 2,
   });
   return currency === "ZMW" ? `K${formatted}` : `$${formatted}`;
+}
+
+function friendlyFailureReason(raw) {
+  const text = String(raw || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) {
+    return "Your bank or card provider could not complete the payment.";
+  }
+  if (/insufficient|funds|balance/i.test(text)) {
+    return "Your bank reported insufficient funds for this gift.";
+  }
+  if (/expired/i.test(text)) {
+    return "The card appears to be expired.";
+  }
+  if (/cvv|cvc|security code/i.test(text)) {
+    return "The security code did not match what your bank expected.";
+  }
+  if (/declin|denied|not authorized|rejected|do not honor/i.test(text)) {
+    return "Your bank declined this payment.";
+  }
+  if (/fraud|risk|blocked/i.test(text)) {
+    return "Your bank blocked this payment for security reasons.";
+  }
+  if (/failed|undefined|null|TypeError|NetworkError|JWT|Cybersource|fetch|VAS|UnifiedCheckout/i.test(text)) {
+    return "Your bank or card provider could not complete the payment.";
+  }
+  // Keep provider wording when it already reads naturally.
+  if (text.length <= 160) return text.replace(/\.$/, "") + ".";
+  return "Your bank or card provider could not complete the payment.";
 }
 
 async function sendWithResend({ to, subject, html }) {
@@ -124,7 +157,11 @@ function brandHeader({ eyebrow }) {
   </tr>`;
 }
 
-function emailFooter() {
+function emailFooter({ staffReportUrl } = {}) {
+  const link = staffReportUrl
+    ? `<a href="${staffReportUrl}" style="color:${GOLD};text-decoration:none;">View recent gifts</a>`
+    : `<a href="${SITE_URL}/" style="color:${GOLD};text-decoration:none;">Visit our website</a>`;
+
   return `
   <tr>
     <td style="background:${NAVY_DEEP};padding:22px 28px;">
@@ -136,9 +173,7 @@ function emailFooter() {
         Meanwood Ibex Hill, Lusaka, Zambia
       </p>
       <p style="margin:0;font-family:Helvetica,Arial,sans-serif;font-size:12px;line-height:1.55;">
-        <a href="${SITE_URL}/" style="color:${GOLD};text-decoration:none;">Visit our website</a>
-        <span style="color:rgba(255,255,255,0.35);"> · </span>
-        <a href="mailto:donations@mulatiwafoundation.org" style="color:${GOLD};text-decoration:none;">donations@mulatiwafoundation.org</a>
+        ${link}
       </p>
     </td>
   </tr>`;
@@ -204,6 +239,53 @@ function donorThankYouHtml({ name, amount, currency }) {
   });
 }
 
+function donorFailedHtml({ name, amount, currency, error_message: errorMessage }) {
+  const safeName = escapeHtml(name);
+  const greeting = safeName ? `Dear ${safeName},` : "Dear friend,";
+  const money = escapeHtml(formatMoney(amount, currency));
+  const reason = escapeHtml(friendlyFailureReason(errorMessage));
+  const bodyHtml = `
+  ${brandHeader({ eyebrow: "Gift update" })}
+  <tr>
+    <td style="padding:32px 28px 8px;">
+      <h1 style="margin:0 0 18px;font-family:Georgia,'Times New Roman',serif;font-size:28px;line-height:1.2;color:${FAIL};font-weight:700;">
+        We could not complete your gift.
+      </h1>
+      <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        ${greeting}
+      </p>
+      <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        Thank you for trying to support Mulatiwa Foundation with a gift of <strong>${money}</strong>. Nothing was charged.
+      </p>
+      <p style="margin:0 0 14px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        ${reason}
+      </p>
+      <p style="margin:0 0 26px;font-family:Helvetica,Arial,sans-serif;font-size:16px;line-height:1.65;color:${INK};">
+        You are welcome to try again whenever you are ready. If this keeps happening, reply to this email and we will help.
+      </p>
+      <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 8px;">
+        <tr>
+          <td style="padding:0 0 12px;">
+            <a href="${SITE_URL}/donate.html" style="display:inline-block;background:${GOLD};color:${NAVY};text-decoration:none;padding:13px 22px;border-radius:999px;font-family:Helvetica,Arial,sans-serif;font-size:14px;font-weight:800;">
+              Try again
+            </a>
+          </td>
+        </tr>
+      </table>
+      <p style="margin:18px 0 8px;font-family:Georgia,'Times New Roman',serif;font-size:16px;line-height:1.5;color:${NAVY};">
+        With care,<br />
+        <strong>Mulatiwa Foundation</strong>
+      </p>
+    </td>
+  </tr>
+  ${emailFooter()}`;
+
+  return emailShell({
+    preheader: `Your ${formatMoney(amount, currency)} gift did not go through. Nothing was charged.`,
+    bodyHtml,
+  });
+}
+
 function staffNotifyHtml({ name, email, amount, currency, reference, whenIso }) {
   const money = escapeHtml(formatMoney(amount, currency));
   const when = new Date(whenIso || Date.now()).toLocaleString("en-ZM", {
@@ -211,6 +293,7 @@ function staffNotifyHtml({ name, email, amount, currency, reference, whenIso }) 
     dateStyle: "full",
     timeStyle: "short",
   });
+  const reportUrl = buildReportUrl({ siteUrl: SITE_URL });
   const rows = [
     ["Donor", name || "Not provided"],
     ["Email", email || "Not provided"],
@@ -263,7 +346,7 @@ function staffNotifyHtml({ name, email, amount, currency, reference, whenIso }) 
       </table>
     </td>
   </tr>
-  ${emailFooter()}`;
+  ${emailFooter({ staffReportUrl: reportUrl || undefined })}`;
 
   return emailShell({
     preheader: `New donation: ${formatMoney(amount, currency)} from ${name || "a donor"}.`,
@@ -303,10 +386,32 @@ async function sendDonationEmails(donation) {
   return results;
 }
 
+async function sendFailedDonationEmail(donation) {
+  if (!donation.email) {
+    console.warn("[mail] No donor email on failed donation; skipped notice");
+    return [{ status: "fulfilled", value: { skipped: true } }];
+  }
+
+  try {
+    const result = await sendWithResend({
+      to: donation.email,
+      subject: "Your gift to Mulatiwa Foundation did not go through",
+      html: donorFailedHtml(donation),
+    });
+    return [{ status: "fulfilled", value: result }];
+  } catch (error) {
+    console.error("[mail] failed-donation send failed", error.message);
+    return [{ status: "rejected", reason: error }];
+  }
+}
+
 module.exports = {
   sendDonationEmails,
+  sendFailedDonationEmail,
   donorThankYouHtml,
+  donorFailedHtml,
   staffNotifyHtml,
+  friendlyFailureReason,
   formatMoney,
   STAFF_TO,
 };

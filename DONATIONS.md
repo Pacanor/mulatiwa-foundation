@@ -138,6 +138,20 @@ Use Visa `4111111111111111` / `12/2026` / `123`, complete checkout, confirm:
 - new row in `data/donations.csv`
 - both emails if Resend is configured
 
+### Staff giving log
+
+Staff donation emails include a discreet **View recent gifts** footer link to `/internal/giving?t=…`.
+
+- Signed with `REPORT_SECRET` (falls back to `CYBS_SECRET_KEY`), valid ~7 days, reusable in that window
+- Not linked from the public site; `robots.txt` disallows `/internal/`
+- Invalid/expired tokens redirect to the landing page
+- Period filters (from/to) work while the token is valid
+- Shows approved and unsuccessful gifts, with mailto links when an email was captured
+
+One-time tokens are intentionally avoided: many email clients prefetch links and would burn a single-use URL before anyone opens it.
+
+Email previews: `/api/donate/email-preview?kind=donor|staff|failed`
+
 ## Apple Pay domain file
 
 The Business Center Apple Pay setup file is hosted at:

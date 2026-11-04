@@ -67,3 +67,6 @@ services:
       - key: ALLOW_TEST_EMAIL
         scope: RUN_TIME
         value: "false"
+      - key: REPORT_SECRET
+        scope: RUN_TIME
+        type: SECRET

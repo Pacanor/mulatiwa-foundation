@@ -102,7 +102,14 @@ function pickDonorFromDetails(details, payload) {
   return { name, email: String(email || "").trim() };
 }
 
-async function enrichDonation({ amount, currency, reference, resultJwt }) {
+async function enrichDonation({
+  amount,
+  currency,
+  reference,
+  resultJwt,
+  status = "approved",
+  errorMessage = "",
+}) {
   const payload = resultJwt ? decodeJwtPayload(resultJwt) : null;
   const jti = payload?.jti || (typeof reference === "string" ? reference : null);
   let details = null;
@@ -129,7 +136,8 @@ async function enrichDonation({ amount, currency, reference, resultJwt }) {
     email: donor.email,
     reference: jti || reference || "",
     whenIso: new Date().toISOString(),
-    status: "approved",
+    status: status || "approved",
+    error_message: errorMessage || "",
   };
 }
 
