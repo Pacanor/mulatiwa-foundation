@@ -12,7 +12,6 @@ const {
   ledgerReady,
   readDonations,
   readLocalDonations,
-  donationsToCsv,
   CSV_LEDGER,
   DATA_DIR,
   SHEET_ID,
@@ -25,7 +24,13 @@ const {
   staffNotifyHtml,
 } = require("./mail");
 const { verifyReportToken } = require("./report-token");
-const { renderReportPage, resolveRange, filterDonations } = require("./report-page");
+const {
+  renderReportPage,
+  resolveRange,
+  filterDonations,
+  buildExportCsv,
+  exportFilename,
+} = require("./report-page");
 const { runWeeklyReport } = require("./weekly-report");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -322,19 +327,17 @@ app.get("/internal/giving.csv", async (req, res) => {
 
   try {
     const donations = await readDonations();
-    const { from, to } = resolveRange({
+    const { period, from, to, fromValue, toValue } = resolveRange({
       periodInput: req.query.period,
       fromInput: req.query.from,
       toInput: req.query.to,
     });
     const rows = filterDonations(donations, from, to);
+    const filename = exportFilename({ period, fromValue, toValue });
     res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
     res.set("Cache-Control", "no-store");
-    res.set(
-      "Content-Disposition",
-      `attachment; filename="mulatiwa-donations-${req.query.period || "custom"}.csv"`,
-    );
-    res.type("text/csv").send(donationsToCsv(rows));
+    res.set("Content-Disposition", `attachment; filename="${filename}"`);
+    res.type("text/csv").send(buildExportCsv(rows));
   } catch (error) {
     console.error("[giving.csv]", error.message);
     return res.status(500).type("text").send("Could not export donations.");

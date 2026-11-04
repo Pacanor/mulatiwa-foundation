@@ -214,17 +214,26 @@ function appendDonation_(payload) {
   return { ok: true, row: last };
 }
 
+function cellToExport_(value) {
+  if (Object.prototype.toString.call(value) === "[object Date]" && !isNaN(value.getTime())) {
+    return value.toISOString();
+  }
+  return value != null && value !== "" ? String(value) : "";
+}
+
 function readDonations_() {
   var sheet = getDonationsSheet_();
-  var values = sheet.getDataRange().getDisplayValues();
+  var values = sheet.getDataRange().getValues();
   if (!values.length) return [];
-  var header = values[0];
+  var header = values[0].map(function (key) {
+    return String(key || "").trim();
+  });
   return values.slice(1).filter(function (line) {
     return line.join("").trim();
   }).map(function (line) {
     var row = {};
     header.forEach(function (key, index) {
-      row[key] = line[index] || "";
+      row[key] = cellToExport_(line[index]);
     });
     return row;
   });

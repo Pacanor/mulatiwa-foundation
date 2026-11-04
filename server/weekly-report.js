@@ -146,9 +146,10 @@ async function buildWeeklySummary(now = new Date()) {
   const weekStart = new Date(summary.startIso);
   const weekEnd = new Date(summary.endIso);
   const failedCount = donations.filter((row) => {
-    if (!row.status || row.status === "approved") return false;
+    const status = String(row.status || "").toLowerCase();
+    if (!status || status === "approved") return false;
     const at = new Date(row.recorded_at);
-    return at >= weekStart && at < weekEnd;
+    return !Number.isNaN(at.getTime()) && at >= weekStart && at < weekEnd;
   }).length;
   return { ...summary, failedCount };
 }

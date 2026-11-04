@@ -222,6 +222,103 @@ function formatTotals(totals) {
   return line || "None";
 }
 
+function formatTotalsHtml(totals) {
+  const parts = Object.entries(totals)
+    .filter(([, value]) => value > 0)
+    .map(
+      ([currency, value]) =>
+        `<span class="total-amt">${escapeHtml(formatMoney(value, currency))}</span>`,
+    );
+  return parts.length ? parts.join("") : `<span class="total-amt">None</span>`;
+}
+
+const EXPORT_HEADERS = [
+  "When (CAT)",
+  "Status",
+  "Amount",
+  "Currency",
+  "Donor",
+  "Email",
+  "Reference",
+  "Note",
+];
+
+function csvEscapeCell(value) {
+  const text = value == null ? "" : String(value);
+  if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+}
+
+function buildExportCsv(rows) {
+  const { approved, failed, totals } = summarize(rows);
+  const lines = [EXPORT_HEADERS.join(",")];
+
+  rows.forEach((row) => {
+    const when = new Date(row.recorded_at);
+    let whenLabel = String(row.recorded_at || "");
+    if (!Number.isNaN(when.getTime())) {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: TIME_ZONE,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      }).formatToParts(when);
+      const get = (type) => parts.find((part) => part.type === type)?.value || "";
+      whenLabel = `${get("year")}-${get("month")}-${get("day")} ${get("hour")}:${get("minute")}`;
+    }
+    const amount = Number(row.amount);
+    const amountText = Number.isFinite(amount) ? amount.toFixed(2) : String(row.amount || "");
+    lines.push(
+      [
+        whenLabel,
+        row.status || "",
+        amountText,
+        String(row.currency || "").toUpperCase(),
+        row.donor_name || "",
+        row.donor_email || "",
+        row.reference || "",
+        row.error_message || "",
+      ]
+        .map(csvEscapeCell)
+        .join(","),
+    );
+  });
+
+  lines.push("");
+  lines.push(["Totals", "", "", "", "", "", "", ""].join(","));
+  lines.push(
+    ["Approved donations", String(approved.length), "", "", "", "", "", ""].map(csvEscapeCell).join(","),
+  );
+  lines.push(
+    ["Unsuccessful donations", String(failed.length), "", "", "", "", "", ""]
+      .map(csvEscapeCell)
+      .join(","),
+  );
+  Object.entries(totals)
+    .filter(([, value]) => value > 0)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .forEach(([currency, value]) => {
+      lines.push(
+        [`Approved total (${currency})`, Number(value).toFixed(2), currency, "", "", "", "", ""]
+          .map(csvEscapeCell)
+          .join(","),
+      );
+    });
+  if (!Object.values(totals).some((value) => value > 0)) {
+    lines.push(["Approved total", "0.00", "", "", "", "", "", ""].map(csvEscapeCell).join(","));
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function exportFilename({ period, fromValue, toValue }) {
+  const safePeriod = String(period || "custom").replace(/[^a-z0-9_-]/gi, "");
+  return `mulatiwa-donations-${safePeriod}-${fromValue}-to-${toValue}.csv`;
+}
+
 function compareCount(current, previous, label) {
   const diff = current - previous;
   if (diff === 0) return `Same as ${label}`;
@@ -252,7 +349,7 @@ function renderRows(rows) {
     return `<tr><td colspan="6" class="empty">No donations in this period.</td></tr>`;
   }
   return rows
-    .map((row) => {
+    .map((row, index) => {
       const when = new Date(row.recorded_at).toLocaleString("en-ZM", {
         timeZone: TIME_ZONE,
         dateStyle: "medium",
@@ -271,7 +368,7 @@ function renderRows(rows) {
         ? `<a class="email-link" href="${mailto}">${escapeHtml(row.donor_email)}</a>`
         : "—";
       return `
-      <tr>
+      <tr data-row-index="${index}">
         <td>${escapeHtml(when)}</td>
         <td><span class="status ${statusClass}">${escapeHtml(status)}</span></td>
         <td><strong>${escapeHtml(money)}</strong></td>
@@ -316,8 +413,10 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
 
   const current = summarize(rows);
   const prior = summarize(previousRows);
-  const totalsLine = formatTotals(current.totals);
+  const totalsHtml = formatTotalsHtml(current.totals);
   const compareLabel = prev.label;
+  const pageSize = 10;
+  const totalRows = rows.length;
 
   const approvedCompare = compareCount(
     current.approved.length,
@@ -402,8 +501,8 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       margin: 0 0 28px; font-family: Georgia, "Times New Roman", serif; color: var(--navy);
       font-size: clamp(2rem, 3.4vw, 2.7rem); line-height: 1.1; letter-spacing: -0.03em;
     }
-    .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 0 0 28px; }
-    .stat { border-radius: 20px; padding: 18px 18px 16px; border: 1px solid transparent; min-height: 118px; }
+    .stats { display: grid; grid-template-columns: 3fr 3fr 6fr; gap: 14px; margin: 0 0 28px; }
+    .stat { border-radius: 20px; padding: 16px 16px 14px; border: 1px solid transparent; min-height: 110px; }
     .stat-ok { background: var(--ok-soft); border-color: rgba(15, 107, 60, 0.18); }
     .stat-fail { background: var(--fail-soft); border-color: rgba(155, 27, 27, 0.16); }
     .stat-total { background: var(--navy-soft); border-color: rgba(18, 58, 109, 0.16); }
@@ -417,7 +516,13 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     }
     .stat-ok strong { color: var(--ok); }
     .stat-fail strong { color: var(--fail); }
-    .stat-total strong { color: var(--navy); }
+    .stat-total .totals-row {
+      display: flex; flex-wrap: nowrap; align-items: baseline; gap: 1.1rem;
+      margin-top: 8px; color: var(--navy); font-family: Georgia, "Times New Roman", serif;
+      font-size: clamp(1.35rem, 2.1vw, 1.85rem); line-height: 1.15; letter-spacing: -0.02em;
+      font-weight: 700; white-space: nowrap; overflow: hidden;
+    }
+    .stat-total .total-amt { display: inline-block; }
     .stat .compare { margin-top: 10px; font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--muted); }
     .toolbar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; margin: 0 0 18px; }
     .period-group {
@@ -466,9 +571,23 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     .email-link:hover { text-decoration: underline; }
     .note-cell { color: var(--muted); max-width: 260px; }
     .empty { padding: 28px 16px; color: var(--muted); }
+    .pager {
+      display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+      gap: 12px; margin: 14px 0 0;
+    }
+    .pager-meta { color: var(--muted); font-size: 13px; font-weight: 600; }
+    .pager-controls { display: inline-flex; align-items: center; gap: 8px; }
+    .pager-btn {
+      min-height: 40px; min-width: 40px; padding: 0 14px; border-radius: 999px;
+      border: 1px solid rgba(18, 58, 109, 0.16); background: #fff; color: var(--navy);
+      font: inherit; font-size: 13px; font-weight: 800; cursor: pointer;
+    }
+    .pager-btn:disabled { opacity: 0.45; cursor: default; }
+    .pager-page { min-width: 4.5rem; text-align: center; font-size: 13px; font-weight: 700; color: var(--navy); }
     .footnote { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
     @media (max-width: 820px) {
       .stats { grid-template-columns: 1fr; }
+      .stat-total .totals-row { flex-wrap: wrap; white-space: normal; }
       .toolbar { align-items: stretch; flex-direction: column; }
     }
   </style>
@@ -499,7 +618,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         </div>
         <div class="stat stat-total">
           <span class="label">Approved total</span>
-          <strong>${escapeHtml(totalsLine)}</strong>
+          <div class="totals-row">${totalsHtml}</div>
           <div class="compare">${escapeHtml(totalsCompare)}</div>
         </div>
       </div>
@@ -510,7 +629,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
         </div>
         <div class="actions">
           <a class="action-btn" href="${exportHref}">Export CSV</a>
-          <button type="button" class="action-btn primary" id="weekly-preview-btn">Email weekly preview</button>
+          <button type="button" class="action-btn primary" id="weekly-preview-btn">Email last week’s summary</button>
         </div>
       </div>
       <p class="status-line" id="status-line" aria-live="polite"></p>
@@ -536,8 +655,16 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
               <th>Note / reference</th>
             </tr>
           </thead>
-          <tbody>${renderRows(rows)}</tbody>
+          <tbody id="donations-body">${renderRows(rows)}</tbody>
         </table>
+      </div>
+      <div class="pager" id="pager" ${totalRows <= pageSize ? "hidden" : ""}>
+        <div class="pager-meta" id="pager-meta"></div>
+        <div class="pager-controls">
+          <button type="button" class="pager-btn" id="pager-prev" aria-label="Previous page">Prev</button>
+          <span class="pager-page" id="pager-page" aria-live="polite"></span>
+          <button type="button" class="pager-btn" id="pager-next" aria-label="Next page">Next</button>
+        </div>
       </div>
       <p class="footnote">Link access expires after about 7 days. Open a fresh link from a staff donation email when needed.</p>
     </section>
@@ -552,6 +679,58 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
       var statusLine = document.getElementById("status-line");
       var weeklyBtn = document.getElementById("weekly-preview-btn");
       var token = ${JSON.stringify(nextToken)};
+      var pageSize = ${pageSize};
+      var totalRows = ${totalRows};
+      var currentPage = 1;
+      var body = document.getElementById("donations-body");
+      var pager = document.getElementById("pager");
+      var pagerMeta = document.getElementById("pager-meta");
+      var pagerPage = document.getElementById("pager-page");
+      var prevBtn = document.getElementById("pager-prev");
+      var nextBtn = document.getElementById("pager-next");
+
+      function totalPages() {
+        return Math.max(1, Math.ceil(totalRows / pageSize) || 1);
+      }
+
+      function renderPage() {
+        if (!body || !totalRows) return;
+        var pages = totalPages();
+        if (currentPage > pages) currentPage = pages;
+        var start = (currentPage - 1) * pageSize;
+        var end = Math.min(start + pageSize, totalRows);
+        Array.prototype.forEach.call(body.querySelectorAll("tr[data-row-index]"), function (row) {
+          var index = Number(row.getAttribute("data-row-index"));
+          row.hidden = index < start || index >= end;
+        });
+        if (pagerMeta) {
+          pagerMeta.textContent = totalRows
+            ? ("Showing " + (start + 1) + "–" + end + " of " + totalRows)
+            : "No donations";
+        }
+        if (pagerPage) pagerPage.textContent = currentPage + " / " + pages;
+        if (prevBtn) prevBtn.disabled = currentPage <= 1;
+        if (nextBtn) nextBtn.disabled = currentPage >= pages;
+        if (pager) pager.hidden = totalRows <= pageSize;
+      }
+
+      if (prevBtn) {
+        prevBtn.addEventListener("click", function () {
+          if (currentPage > 1) {
+            currentPage -= 1;
+            renderPage();
+          }
+        });
+      }
+      if (nextBtn) {
+        nextBtn.addEventListener("click", function () {
+          if (currentPage < totalPages()) {
+            currentPage += 1;
+            renderPage();
+          }
+        });
+      }
+      renderPage();
 
       document.querySelectorAll(".period-btn").forEach(function (btn) {
         btn.addEventListener("click", function () {
@@ -576,7 +755,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
 
       weeklyBtn.addEventListener("click", async function () {
         weeklyBtn.disabled = true;
-        statusLine.textContent = "Sending weekly preview…";
+        statusLine.textContent = "Sending last week’s summary…";
         try {
           var res = await fetch("/internal/giving/weekly-preview", {
             method: "POST",
@@ -585,9 +764,18 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
           });
           var payload = await res.json().catch(function () { return {}; });
           if (!res.ok) throw new Error(payload.error || "Could not send preview");
-          statusLine.textContent = "Weekly preview sent to " + (payload.sent_to || "your inbox") + ".";
+          var totals = payload.totals || {};
+          var totalBits = Object.keys(totals).filter(function (key) {
+            return Number(totals[key]) > 0;
+          }).map(function (key) {
+            return key + " " + totals[key];
+          }).join(", ");
+          statusLine.textContent =
+            "Last week’s summary sent to " + (payload.sent_to || "your inbox") +
+            " (" + (payload.approved || 0) + " approved" +
+            (totalBits ? ": " + totalBits : "") + ").";
         } catch (error) {
-          statusLine.textContent = error.message || "Could not send preview.";
+          statusLine.textContent = error.message || "Could not send weekly summary.";
         } finally {
           weeklyBtn.disabled = false;
         }
@@ -604,5 +792,7 @@ module.exports = {
   filterDonations,
   previousComparableRange,
   summarize,
+  buildExportCsv,
+  exportFilename,
   PRESETS,
 };

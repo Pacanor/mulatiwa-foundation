@@ -207,20 +207,53 @@ function readLocalDonations() {
   return readLocalCsv();
 }
 
+function zonedYmd_(date = new Date(), timeZone = "Africa/Lusaka") {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const get = (type) => parts.find((part) => part.type === type)?.value;
+  return `${get("year")}-${get("month")}-${get("day")}`;
+}
+
+function weekdayInZone_(date = new Date(), timeZone = "Africa/Lusaka") {
+  const label = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    weekday: "short",
+  }).format(date);
+  return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(label);
+}
+
+function addDaysYmd_(ymd, days) {
+  const date = new Date(`${ymd}T12:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function dayBoundsUtc_(ymd) {
+  // Treat calendar days in Africa/Lusaka (UTC+2, no DST).
+  const start = new Date(`${ymd}T00:00:00.000+02:00`);
+  const next = addDaysYmd_(ymd, 1);
+  const end = new Date(`${next}T00:00:00.000+02:00`);
+  return { start, end };
+}
+
 function summarizeWeek(donations, now = new Date()) {
-  const end = new Date(now);
-  const start = new Date(now);
-  const day = start.getDay();
-  const daysSinceMonday = (day + 6) % 7;
-  start.setHours(0, 0, 0, 0);
-  start.setDate(start.getDate() - daysSinceMonday - 7);
-  end.setTime(start.getTime());
-  end.setDate(start.getDate() + 7);
+  // Previous complete Mon–Sun in Africa/Lusaka (matches Monday cron).
+  const today = zonedYmd_(now);
+  const dow = weekdayInZone_(now);
+  const daysFromMonday = (dow + 6) % 7;
+  const thisMonday = addDaysYmd_(today, -daysFromMonday);
+  const prevMonday = addDaysYmd_(thisMonday, -7);
+  const { start } = dayBoundsUtc_(prevMonday);
+  const { start: end } = dayBoundsUtc_(thisMonday);
 
   const approved = donations.filter((row) => {
-    if (row.status && row.status !== "approved") return false;
+    if (row.status && String(row.status).toLowerCase() !== "approved") return false;
     const at = new Date(row.recorded_at);
-    return at >= start && at < end;
+    return !Number.isNaN(at.getTime()) && at >= start && at < end;
   });
 
   const totals = { USD: 0, ZMW: 0 };
