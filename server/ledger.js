@@ -1,12 +1,13 @@
 const fs = require("fs");
 const path = require("path");
 
+const SHEET_ID =
+  process.env.GOOGLE_SHEET_ID || "1-BfsegzvrqhRZAafrS43MGjfCKCUQ5jKHEIuLZ8zF1s";
+
 function resolveDataDir() {
   if (process.env.DATA_DIR) {
     return path.resolve(process.env.DATA_DIR);
   }
-
-  // Prefer an App Platform volume mount when present.
   const volumeDir = "/data";
   try {
     if (fs.existsSync(volumeDir)) {
@@ -14,15 +15,13 @@ function resolveDataDir() {
       return volumeDir;
     }
   } catch {
-    // fall through to local/ephemeral data dir
+    // fall through
   }
-
   return path.join(__dirname, "..", "data");
 }
 
 const DATA_DIR = resolveDataDir();
 const CSV_LEDGER = path.join(DATA_DIR, "donations.csv");
-const LEGACY_JSONL = path.join(DATA_DIR, "donations.jsonl");
 
 const CSV_HEADERS = [
   "recorded_at",
@@ -57,20 +56,6 @@ function ensureCsvHeader() {
   ensureDataDir();
   if (!fs.existsSync(CSV_LEDGER)) {
     fs.writeFileSync(CSV_LEDGER, `${CSV_HEADERS.join(",")}\n`, "utf8");
-    return;
-  }
-
-  // Migrate older ledgers that predate error_message.
-  const existing = fs.readFileSync(CSV_LEDGER, "utf8");
-  const firstLine = existing.split(/\r?\n/)[0] || "";
-  if (firstLine && !firstLine.split(",").includes("error_message")) {
-    const lines = existing.split(/\r?\n/);
-    lines[0] = CSV_HEADERS.join(",");
-    const rest = lines.slice(1).map((line) => {
-      if (!line.trim()) return line;
-      return `${line},`;
-    });
-    fs.writeFileSync(CSV_LEDGER, [lines[0], ...rest].join("\n"), "utf8");
   }
 }
 
@@ -78,7 +63,6 @@ function parseCsvLine(line) {
   const cells = [];
   let current = "";
   let inQuotes = false;
-
   for (let i = 0; i < line.length; i += 1) {
     const ch = line[i];
     if (inQuotes) {
@@ -105,37 +89,19 @@ function parseCsvLine(line) {
   return cells;
 }
 
-function appendCsv(row) {
+function appendLocalCsv(row) {
   ensureCsvHeader();
   fs.appendFileSync(CSV_LEDGER, `${toCsvRow(row)}\n`, "utf8");
 }
 
-async function recordDonation(donation) {
-  const row = {
-    recorded_at: donation.whenIso || new Date().toISOString(),
-    status: donation.status || "approved",
-    amount: donation.amount,
-    currency: donation.currency,
-    donor_name: donation.name || "",
-    donor_email: donation.email || "",
-    reference: donation.reference || "",
-    error_message: donation.error_message || "",
-  };
-
-  appendCsv(row);
-  return row;
-}
-
-function readCsvDonations() {
+function readLocalCsv() {
   if (!fs.existsSync(CSV_LEDGER)) return [];
   const lines = fs
     .readFileSync(CSV_LEDGER, "utf8")
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-
   if (lines.length <= 1) return [];
-
   const header = parseCsvLine(lines[0]);
   return lines.slice(1).map((line) => {
     const cells = parseCsvLine(line);
@@ -147,28 +113,98 @@ function readCsvDonations() {
   });
 }
 
-function readLegacyJsonl() {
-  if (!fs.existsSync(LEGACY_JSONL)) return [];
-  return fs
-    .readFileSync(LEGACY_JSONL, "utf8")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => {
-      try {
-        return JSON.parse(line);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
+function webhookUrl() {
+  return String(process.env.DONATION_LEDGER_WEBHOOK_URL || "").trim();
+}
+
+function exportUrl() {
+  return String(
+    process.env.DONATION_LEDGER_EXPORT_URL || process.env.DONATION_LEDGER_WEBHOOK_URL || "",
+  ).trim();
+}
+
+async function appendRemoteSheet(row) {
+  const webhook = webhookUrl();
+  if (!webhook) return { skipped: true };
+
+  const response = await fetch(webhook, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(row),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(`Sheet webhook failed (${response.status}): ${text}`);
+  }
+  return { ok: true, body: text };
+}
+
+async function readRemoteSheet() {
+  const url = exportUrl();
+  if (!url) return null;
+
+  const response = await fetch(url, {
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`Sheet export failed (${response.status})`);
+  }
+  const payload = await response.json();
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.donations)) return payload.donations;
+  return [];
+}
+
+function toRow(donation) {
+  return {
+    recorded_at: donation.whenIso || donation.recorded_at || new Date().toISOString(),
+    status: donation.status || "approved",
+    amount: donation.amount,
+    currency: donation.currency,
+    donor_name: donation.name || donation.donor_name || "",
+    donor_email: donation.email || donation.donor_email || "",
+    reference: donation.reference || "",
+    error_message: donation.error_message || "",
+  };
+}
+
+async function recordDonation(donation) {
+  const row = toRow(donation);
+
+  // Local mirror helps local testing; production durability is the Sheet.
+  try {
+    appendLocalCsv(row);
+  } catch (error) {
+    console.warn("[ledger] local csv append failed:", error.message);
+  }
+
+  try {
+    const remote = await appendRemoteSheet(row);
+    if (remote?.skipped) {
+      console.warn(
+        "[ledger] DONATION_LEDGER_WEBHOOK_URL missing; saved locally only (ephemeral on App Platform)",
+      );
+    }
+  } catch (error) {
+    // Never fail the donor experience if the Sheet webhook is down.
+    console.error("[ledger] sheet append failed:", error.message);
+  }
+
+  return row;
+}
+
+async function readDonations() {
+  try {
+    const remote = await readRemoteSheet();
+    if (remote) return remote;
+  } catch (error) {
+    console.warn("[ledger] sheet read failed, falling back to local:", error.message);
+  }
+  return readLocalCsv();
 }
 
 function readLocalDonations() {
-  const csvRows = readCsvDonations();
-  if (csvRows.length) return csvRows;
-  // Fall back once if an older local JSONL log still exists.
-  return readLegacyJsonl();
+  return readLocalCsv();
 }
 
 function summarizeWeek(donations, now = new Date()) {
@@ -204,6 +240,7 @@ function summarizeWeek(donations, now = new Date()) {
 }
 
 function ledgerReady() {
+  if (webhookUrl()) return true;
   try {
     ensureDataDir();
     fs.accessSync(DATA_DIR, fs.constants.W_OK);
@@ -213,11 +250,23 @@ function ledgerReady() {
   }
 }
 
+function donationsToCsv(rows) {
+  const lines = [CSV_HEADERS.join(",")];
+  rows.forEach((row) => {
+    lines.push(toCsvRow(toRow(row)));
+  });
+  return `${lines.join("\n")}\n`;
+}
+
 module.exports = {
   recordDonation,
+  readDonations,
   readLocalDonations,
   summarizeWeek,
   ledgerReady,
+  donationsToCsv,
+  CSV_HEADERS,
   CSV_LEDGER,
   DATA_DIR,
+  SHEET_ID,
 };

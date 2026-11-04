@@ -7,7 +7,16 @@ const dotenv = require("dotenv");
 const cron = require("node-cron");
 const { createCaptureContext } = require("./cybersource");
 const { enrichDonation } = require("./donations");
-const { recordDonation, ledgerReady, readLocalDonations, CSV_LEDGER, DATA_DIR } = require("./ledger");
+const {
+  recordDonation,
+  ledgerReady,
+  readDonations,
+  readLocalDonations,
+  donationsToCsv,
+  CSV_LEDGER,
+  DATA_DIR,
+  SHEET_ID,
+} = require("./ledger");
 const {
   sendDonationEmails,
   sendFailedDonationEmail,
@@ -16,7 +25,7 @@ const {
   staffNotifyHtml,
 } = require("./mail");
 const { verifyReportToken } = require("./report-token");
-const { renderReportPage } = require("./report-page");
+const { renderReportPage, resolveRange, filterDonations } = require("./report-page");
 const { runWeeklyReport } = require("./weekly-report");
 
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
@@ -137,12 +146,16 @@ const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
   let donationCount = 0;
   try {
-    donationCount = readLocalDonations().length;
+    donationCount = (await readDonations()).length;
   } catch {
-    donationCount = 0;
+    try {
+      donationCount = readLocalDonations().length;
+    } catch {
+      donationCount = 0;
+    }
   }
   res.json({
     status: "ok",
@@ -152,7 +165,9 @@ app.get("/api/health", (_req, res) => {
     ),
     mail_ready: Boolean(process.env.RESEND_API_KEY),
     ledger_ready: ledgerReady(),
+    ledger_sheet: Boolean(process.env.DONATION_LEDGER_WEBHOOK_URL),
     ledger_dir: DATA_DIR,
+    google_sheet_id: SHEET_ID,
     donation_count: donationCount,
   });
 });
@@ -261,25 +276,78 @@ app.post("/api/donate/complete", async (req, res) => {
   }
 });
 
-// Obscure staff giving log — requires signed ?t= token from donation emails.
-app.get("/internal/giving", (req, res) => {
+// Obscure staff donations log — requires signed ?t= token from donation emails.
+app.get("/internal/giving", async (req, res) => {
   const token = String(req.query.t || "");
   if (!verifyReportToken(token)) {
     return res.redirect(302, "/");
   }
 
-  res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
-  res.set("Cache-Control", "no-store");
-  res
-    .type("html")
-    .send(
+  try {
+    const donations = await readDonations();
+    res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    res.set("Cache-Control", "no-store");
+    res.type("html").send(
       renderReportPage({
         periodInput: req.query.period,
         fromInput: req.query.from,
         toInput: req.query.to,
         token,
+        donations,
       }),
     );
+  } catch (error) {
+    console.error("[giving]", error.message);
+    return res.status(500).type("text").send("Could not load donations log.");
+  }
+});
+
+app.get("/internal/giving.csv", async (req, res) => {
+  const token = String(req.query.t || "");
+  if (!verifyReportToken(token)) {
+    return res.redirect(302, "/");
+  }
+
+  try {
+    const donations = await readDonations();
+    const { from, to } = resolveRange({
+      periodInput: req.query.period,
+      fromInput: req.query.from,
+      toInput: req.query.to,
+    });
+    const rows = filterDonations(donations, from, to);
+    res.set("X-Robots-Tag", "noindex, nofollow, noarchive");
+    res.set("Cache-Control", "no-store");
+    res.set(
+      "Content-Disposition",
+      `attachment; filename="mulatiwa-donations-${req.query.period || "custom"}.csv"`,
+    );
+    res.type("text/csv").send(donationsToCsv(rows));
+  } catch (error) {
+    console.error("[giving.csv]", error.message);
+    return res.status(500).type("text").send("Could not export donations.");
+  }
+});
+
+app.post("/internal/giving/weekly-preview", async (req, res) => {
+  const token = String(req.body?.t || req.query.t || "");
+  if (!verifyReportToken(token)) {
+    return res.status(403).json({ error: "Invalid or expired report link." });
+  }
+
+  try {
+    const to = String(req.body?.email || "papiasb@gmail.com").trim();
+    const summary = await runWeeklyReport({ to });
+    return res.json({
+      ok: true,
+      sent_to: to,
+      approved: summary.count,
+      totals: summary.totals,
+    });
+  } catch (error) {
+    console.error("[weekly-preview]", error.message);
+    return res.status(500).json({ error: error.message });
+  }
 });
 
 // Browser preview of branded donation emails (no send).
