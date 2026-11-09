@@ -385,6 +385,28 @@ async function getTransaction(id) {
   return friendlyDetail(detail);
 }
 
+async function findRecentDonorContact({ amount, currency, withinMs = 8 * 60 * 1000 } = {}) {
+  const targetAmount = Number(amount);
+  const targetCurrency = String(currency || "").toUpperCase();
+  if (!Number.isFinite(targetAmount) || targetAmount <= 0 || !targetCurrency) return null;
+
+  const to = new Date();
+  const from = new Date(Date.now() - withinMs);
+  const rows = await searchTransactions({ from, to, limit: 40 });
+  const match = rows.find((row) => {
+    if (String(row.status || "").toLowerCase() !== "approved") return false;
+    if (String(row.currency || "").toUpperCase() !== targetCurrency) return false;
+    if (!row.donor_email) return false;
+    return Math.abs(Number(row.amount) - targetAmount) < 0.009;
+  });
+  if (!match) return null;
+  return {
+    id: match.id || match.reference || "",
+    name: match.donor_name || "",
+    email: match.donor_email || "",
+  };
+}
+
 async function readDonations(options = {}) {
   return searchTransactions(options);
 }
@@ -479,6 +501,7 @@ module.exports = {
   readDonations,
   searchTransactions,
   getTransaction,
+  findRecentDonorContact,
   summarizeWeek,
   buildWeekDonations,
   ledgerReady,

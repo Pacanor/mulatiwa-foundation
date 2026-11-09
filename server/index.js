@@ -243,6 +243,7 @@ app.post("/api/donate/complete", async (req, res) => {
       currency,
       reference: req.body?.reference || "",
       resultJwt: req.body?.result_jwt || "",
+      transientToken: req.body?.transient_token || "",
       paymentResult: req.body?.payment_result || null,
       paymentCompleted: Boolean(req.body?.payment_completed),
       status: requestedStatus,
@@ -266,9 +267,25 @@ app.post("/api/donate/complete", async (req, res) => {
 
     const finalStatus = String(donation.status || requestedStatus).toLowerCase();
     const isSeed = String(donation.reference || "").startsWith("SEED-");
+    let donorEmailSent = false;
     if (!isSeed) {
       if (finalStatus === "approved") {
-        await sendDonationEmails(donation);
+        if (!donation.email) {
+          console.warn(
+            "[donate/complete] approved without donor email; thank-you skipped",
+            donation.reference || "",
+          );
+        }
+        const mailResults = await sendDonationEmails(donation);
+        // Donor thank-you is always the first job when donation.email is present.
+        const donorResult =
+          donation.email && Array.isArray(mailResults) ? mailResults[0] : null;
+        donorEmailSent = Boolean(
+          donorResult &&
+            donorResult.status === "fulfilled" &&
+            donorResult.value &&
+            !donorResult.value.skipped,
+        );
       } else {
         await sendFailedDonationEmail(donation);
       }
@@ -277,7 +294,7 @@ app.post("/api/donate/complete", async (req, res) => {
     return res.json({
       ok: true,
       recorded: true,
-      donor_email_sent: Boolean(donation.email) && !isSeed && finalStatus === "approved",
+      donor_email_sent: donorEmailSent,
       reference: donation.reference,
       status: finalStatus,
       amount: donation.amount,

@@ -67,11 +67,11 @@ async function fetchPaymentDetails(jti) {
   if (!merchantId || !keyId || !secretKey) return null;
 
   const host = getHost(process.env.CYBS_ENV === "production" ? "production" : "test");
-  const resourcePath = `/ups/v1/payment-details/${encodeURIComponent(jti)}`;
-  // Prefer documented flex path; fall back handled by caller if 404
+  // Documented UC Payment Details path first, then alternate hosts used by older docs.
   const candidates = [
     `/flex/v2/payment-details/${encodeURIComponent(jti)}`,
-    resourcePath,
+    `/up/v1/payment-details/${encodeURIComponent(jti)}`,
+    `/ups/v1/payment-details/${encodeURIComponent(jti)}`,
   ];
 
   for (const path of candidates) {
@@ -228,15 +228,18 @@ async function enrichDonation({
   currency,
   reference,
   resultJwt,
+  transientToken = "",
   paymentResult = null,
   paymentCompleted = false,
   status = "approved",
   errorMessage = "",
 }) {
   const payload = resultJwt ? decodeJwtPayload(resultJwt) : null;
+  const transientPayload = transientToken ? decodeJwtPayload(transientToken) : null;
   const inlineResult =
     paymentResult && typeof paymentResult === "object" ? paymentResult : null;
-  let jti = payload?.jti || null;
+  // Prefer the mount transient-token jti for Payment Details (bill-to / email).
+  let jti = transientPayload?.jti || payload?.jti || null;
   let details = null;
   let normalizedStatus = status || "approved";
   let normalizedError = errorMessage || "";
@@ -370,31 +373,32 @@ async function enrichDonation({
   // Authoritative confirmation from Transaction Search when we have a payment id.
   // Retry briefly: TSS can lag a second behind Unified Checkout complete().
   let txnDonor = { name: "", email: "" };
-  if (paymentId && !String(paymentId).startsWith("SEED-")) {
-    const applyTxn = (txn) => {
-      if (!txn) return false;
-      const txnAmount = Number(txn.amount);
-      if (Number.isFinite(txnAmount) && txnAmount > 0) chargedAmount = txnAmount;
-      if (txn.currency) currencyCode = String(txn.currency).toUpperCase();
-      if (txn.status === "approved") {
-        normalizedStatus = "approved";
-        normalizedError = "";
-      } else if (txn.status === "declined" || txn.status === "failed") {
-        normalizedStatus = txn.status;
-        normalizedError = txn.error_message || normalizedError || txn.status;
-      }
-      txnDonor = {
-        name: txn.donor_name || txn.bill_to?.name || "",
-        email: txn.donor_email || txn.bill_to?.email || "",
-      };
-      return Boolean(txnDonor.email);
+  const applyTxn = (txn) => {
+    if (!txn) return false;
+    const txnAmount = Number(txn.amount);
+    if (Number.isFinite(txnAmount) && txnAmount > 0) chargedAmount = txnAmount;
+    if (txn.currency) currencyCode = String(txn.currency).toUpperCase();
+    if (txn.status === "approved") {
+      normalizedStatus = "approved";
+      normalizedError = "";
+    } else if (txn.status === "declined" || txn.status === "failed") {
+      normalizedStatus = txn.status;
+      normalizedError = txn.error_message || normalizedError || txn.status;
+    }
+    txnDonor = {
+      name: txn.donor_name || txn.bill_to?.name || "",
+      email: txn.donor_email || txn.bill_to?.email || "",
     };
+    if (txn.id && !paymentId) paymentId = txn.id;
+    return Boolean(txnDonor.email);
+  };
 
+  if (paymentId && !String(paymentId).startsWith("SEED-")) {
     try {
       let txn = await lookupTransactionSafe(paymentId);
       let foundEmail = applyTxn(txn);
       if (!foundEmail) {
-        await new Promise((resolve) => setTimeout(resolve, 1200));
+        await new Promise((resolve) => setTimeout(resolve, 1500));
         txn = await lookupTransactionSafe(paymentId);
         applyTxn(txn);
       }
@@ -403,9 +407,32 @@ async function enrichDonation({
     }
   }
 
-  const donor = pickDonorFromDetails(details, payload || inlineResult);
+  const donor = pickDonorFromDetails(details, payload || inlineResult || transientPayload);
   if (!donor.email && txnDonor.email) donor.email = String(txnDonor.email).trim();
   if (!donor.name && txnDonor.name) donor.name = String(txnDonor.name).trim();
+
+  // Last resort: match a just-completed TSS row by amount/currency. UC already
+  // stored bill-to there even when the complete() payload omitted it.
+  if (
+    !donor.email &&
+    String(normalizedStatus).toLowerCase() === "approved" &&
+    !String(reference || "").startsWith("SEED-")
+  ) {
+    try {
+      const { findRecentDonorContact } = require("./ledger");
+      const recent = await findRecentDonorContact({
+        amount: Number.isFinite(chargedAmount) ? chargedAmount : amount,
+        currency: currencyCode,
+      });
+      if (recent) {
+        if (recent.email) donor.email = recent.email;
+        if (!donor.name && recent.name) donor.name = recent.name;
+        if (!paymentId && recent.id) paymentId = recent.id;
+      }
+    } catch (error) {
+      console.warn("[donations] recent donor lookup failed:", error.message);
+    }
+  }
   if (chargedAmount == null) {
     chargedAmount =
       readChargedAmount(details) ??

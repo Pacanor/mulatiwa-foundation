@@ -346,7 +346,7 @@ function compareTotals(currentTotals, previousTotals, label) {
 
 function renderRows(rows) {
   if (!rows.length) {
-    return `<tr><td colspan="6" class="empty">No donations in this period.</td></tr>`;
+    return `<tr><td colspan="4" class="empty">No donations in this period.</td></tr>`;
   }
   return rows
     .map((row, index) => {
@@ -358,23 +358,12 @@ function renderRows(rows) {
       const status = String(row.status || "unknown");
       const statusClass = status === "approved" ? "is-approved" : "is-failed";
       const money = formatMoney(row.amount, row.currency);
-      const note = row.error_message || row.card || "";
-      const mailto =
-        row.donor_email &&
-        `mailto:${encodeURIComponent(row.donor_email)}?subject=${encodeURIComponent(
-          "About your donation to Mulatiwa Foundation",
-        )}`;
-      const emailCell = row.donor_email
-        ? `<a class="email-link" href="${mailto}" data-stop-row="1">${escapeHtml(row.donor_email)}</a>`
-        : "—";
       return `
       <tr class="donation-row" data-row-index="${index}" data-txn-id="${escapeHtml(row.id || row.reference || "")}" tabindex="0" role="button" aria-label="View donation details">
         <td>${escapeHtml(when)}</td>
         <td><span class="status ${statusClass}">${escapeHtml(status)}</span></td>
         <td><strong>${escapeHtml(money)}</strong></td>
         <td>${escapeHtml(row.donor_name || "—")}</td>
-        <td>${emailCell}</td>
-        <td class="note-cell">${escapeHtml(note || row.reference || "—")}</td>
       </tr>`;
     })
     .join("");
@@ -749,8 +738,6 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
               <th>Status</th>
               <th>Amount</th>
               <th>Donor</th>
-              <th>Email</th>
-              <th>Note / reference</th>
             </tr>
           </thead>
           <tbody id="donations-body">${renderRows(rows)}</tbody>
@@ -1074,26 +1061,66 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
             if (/processed successfully/i.test(decisionMessage) && tx.status !== "approved") {
               decisionMessage = tx.error_message || decisionMessage;
             }
+            var services = tx.services || {};
+            var auth = services.authorization || {};
+            var capture = services.capture || {};
+            var decisionMgr = services.decision_manager || {};
+            var apps = Array.isArray(tx.applications) ? tx.applications : [];
+            var payerAuth = apps.filter(function (app) {
+              return String(app.name || "").indexOf("ics_pa_") === 0;
+            });
+            var payerAuthLabel = payerAuth.length
+              ? payerAuth.map(function (app) {
+                  return String(app.name || "").replace(/^ics_pa_/, "") +
+                    (app.status ? " · " + app.status : "");
+                }).join(", ")
+              : "";
+            var riskRules = (tx.decision && Array.isArray(tx.decision.risk_rules))
+              ? tx.decision.risk_rules.map(function (rule) {
+                  return (rule.name || "Rule") + (rule.decision ? " (" + rule.decision + ")" : "");
+                }).join(", ")
+              : "";
+            var mailto = tx.bill_to && tx.bill_to.email
+              ? '<a class="email-link" href="mailto:' + encodeURIComponent(tx.bill_to.email) +
+                '?subject=' + encodeURIComponent("About your donation to Mulatiwa Foundation") +
+                '">' + tx.bill_to.email + "</a>"
+              : "—";
             setModalBody(
-              '<div class="detail-grid">' +
+              '<div class="detail-section"><h3>Summary</h3><div class="detail-grid">' +
                 field("When (CAT)", when) +
                 field("Status", tx.status, "status") +
                 field("Amount", money(tx.amount, tx.currency)) +
-                field("Request ID", tx.id || tx.reference) +
                 field("Client reference", tx.client_reference) +
-                field("Card", tx.card || (tx.payment && tx.payment.card)) +
-              "</div>" +
+                field("Request ID", tx.id || tx.reference) +
+              "</div></div>" +
               '<div class="detail-section"><h3>Donor</h3><div class="detail-grid">' +
                 field("Name", tx.bill_to && tx.bill_to.name) +
-                field("Email", tx.bill_to && tx.bill_to.email) +
+                '<div class="detail-item"><span>Email</span><strong>' + mailto + "</strong></div>" +
                 field("Country", tx.bill_to && tx.bill_to.country) +
                 field("Postal code", tx.bill_to && tx.bill_to.postal_code) +
               "</div></div>" +
-              '<div class="detail-section"><h3>What happened</h3><div class="detail-grid">' +
+              '<div class="detail-section"><h3>Payment</h3><div class="detail-grid">' +
+                field("Card", tx.card || (tx.payment && tx.payment.card)) +
+                field("Approval code", tx.processor && tx.processor.approval_code) +
+                field("Authorization", auth.status || auth.message, "risk") +
+                field("Settlement", capture.status || capture.message, "risk") +
+                field("Decision Manager", decisionMgr.status || decisionMgr.message, "risk") +
+                field("3-D Secure", payerAuthLabel) +
+              "</div></div>" +
+              '<div class="detail-section"><h3>Risk &amp; processor</h3><div class="detail-grid">' +
                 field("Decision message", decisionMessage) +
                 field("Reason code", (tx.decision && tx.decision.overall_reason) || tx.reason_code, "reason") +
                 field("Risk decision", tx.decision && tx.decision.risk_decision, "risk") +
+                field("Risk rules", riskRules) +
+                field("AVS", tx.processor && tx.processor.avs) +
+                field("CVV", tx.processor && tx.processor.cvv) +
                 field("Response code", tx.processor && tx.processor.response_code, "response") +
+                field("Processor", tx.processor && tx.processor.name) +
+              "</div></div>" +
+              '<div class="detail-section"><h3>References</h3><div class="detail-grid">' +
+                field("Reconciliation ID", tx.reconciliation_id) +
+                field("Retrieval reference", tx.processor && tx.processor.retrieval_reference) +
+                field("Merchant ID", tx.merchant_id) +
               "</div></div>"
             );
           })

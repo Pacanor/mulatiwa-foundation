@@ -262,6 +262,7 @@
     currency,
     reference,
     resultJwt,
+    transientToken,
     paymentResult,
     paymentCompleted,
     errorMessage,
@@ -275,6 +276,9 @@
         currency,
         reference,
         result_jwt: resultJwt || "",
+        // Mount transient token keeps bill-to/email available via Payment Details
+        // even after complete() returns a payment object without those fields.
+        transient_token: transientToken || "",
         payment_result: paymentResult || null,
         payment_completed: Boolean(paymentCompleted),
         error_message: errorMessage || "",
@@ -605,6 +609,7 @@
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
       measureActiveStepHeight();
+      const transientToken = isTransientToken(mountResponse) ? mountResponse : "";
       const finalized = await finalizeCheckoutResult(mountResponse);
       if (generation !== checkoutGeneration) return;
       const completeResponse = finalized?.result;
@@ -621,12 +626,14 @@
 
       // Server verifies against Cybersource. After UC complete(), skip a second
       // PTS capture and confirm the final decision from the payment result / TSS.
+      // Keep the mount transient token so Payment Details can return donor email.
       const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
         currency: payload.currency,
         reference,
         resultJwt,
+        transientToken,
         paymentResult,
         paymentCompleted,
       });
