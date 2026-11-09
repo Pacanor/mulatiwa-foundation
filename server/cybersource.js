@@ -99,11 +99,13 @@ async function createCaptureContext({
       showConfirmationStep: false,
       showAcceptedNetworkIcons: true,
     },
-    // Do not send completeMandate. Business Center may still inject one when
-    // "Payment Processing" is enabled; the client forces autoProcessing:false
-    // and we capture via PTS with the explicit gift amount. UC browser capture
-    // on this MID previously settled discounted $0 auths (SDISCOUNT + cancelled
-    // bill) while the UI still showed the selected gift.
+    // Required for PAN-entry 3DS: BC enabling 3DS alone is not enough. UC only
+    // runs Payer Authentication when completeMandate.consumerAuthentication is
+    // "3DS" (or PASSKEY) and the client calls complete() / autoProcessing.
+    completeMandate: {
+      type: "CAPTURE",
+      consumerAuthentication: "3DS",
+    },
     appearance: {
       theme: "LIGHT",
       variables: {
@@ -217,7 +219,9 @@ async function createPaymentWithTransientToken({
     },
     processingInformation: {
       capture: true,
-      commerceIndicator: "internet",
+      // Do not force commerceIndicator: "internet". That marks the sale as
+      // non-authenticated (ECI 7) and trips the MID's "Non 3ds Rule". Prefer
+      // the indicator carried by an authenticated Unified Checkout token.
     },
     tokenInformation: {
       transientTokenJwt,

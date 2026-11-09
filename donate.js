@@ -473,13 +473,34 @@
   };
 
   const finalizeCheckoutResult = async (mountResult) => {
-    // autoProcessing is false so mount() returns a transient token. We never call
-    // checkout.complete() — the server captures via PTS with the selected amount.
-    if (isTransientToken(mountResult) && statusEl) {
+    // mount() returns a transient token when autoProcessing is false. Calling
+    // complete() is what runs Payer Authentication (3DS) under completeMandate.
+    if (!isTransientToken(mountResult)) return mountResult;
+
+    if (statusEl) {
       statusEl.hidden = false;
-      statusEl.textContent = "Confirming your gift with the bank…";
+      statusEl.textContent = "Verifying your card with 3-D Secure…";
     }
-    return mountResult;
+    measureActiveStepHeight();
+
+    if (!activeCheckout || typeof activeCheckout.complete !== "function") {
+      // Fall back to server PTS if complete() is unavailable.
+      if (statusEl) statusEl.textContent = "Confirming your gift with the bank…";
+      return mountResult;
+    }
+
+    try {
+      const completed = await activeCheckout.complete(mountResult);
+      return completed;
+    } catch (error) {
+      // If complete() is refused because autoProcessing already handled it,
+      // keep the mount result for the server path.
+      const message = String(error?.message || "");
+      if (/autoProcessing|already|complete mandate/i.test(message)) {
+        return mountResult;
+      }
+      throw error;
+    }
   };
 
   const startCheckout = async () => {
@@ -538,7 +559,8 @@
       if (generation !== checkoutGeneration) return;
 
       const walletPending = startWalletButtons(activeClient);
-      // Transient token only — server PTS charges the selected amount.
+      // Collect card details first, then complete() so Unified Checkout can run 3DS
+      // under completeMandate.consumerAuthentication before the sale is finished.
       activeCheckout = await activeClient.createCheckout({
         autoProcessing: false,
       });
@@ -566,7 +588,8 @@
         statusEl.textContent = "Recording your gift…";
       }
 
-      // Server captures via PTS using the session amount (source of truth).
+      // Server verifies the charged amount. If UC only returned a Flex token,
+      // it captures via PTS without forcing a non-3DS commerce indicator.
       const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
