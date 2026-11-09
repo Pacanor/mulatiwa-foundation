@@ -1,6 +1,16 @@
 const { getHost, createPaymentWithTransientToken } = require("./cybersource");
 const crypto = require("crypto");
 
+function lookupTransactionSafe(id) {
+  try {
+    // Lazy require avoids a circular dependency at module load.
+    const { getTransaction } = require("./ledger");
+    return getTransaction(id);
+  } catch {
+    return null;
+  }
+}
+
 function decodeJwtPayload(jwt) {
   try {
     const parts = String(jwt).split(".");
@@ -120,6 +130,7 @@ function readChargedAmount(source) {
   const details =
     source.orderInformation?.amountDetails ||
     source.content?.orderInformation?.amountDetails ||
+    source.data?.orderInformation?.amountDetails ||
     null;
   if (!details) return null;
   const raw =
@@ -127,6 +138,8 @@ function readChargedAmount(source) {
     details.authorizedAmount ??
     details.totalAmount?.value ??
     details.totalAmount ??
+    details.amount?.value ??
+    details.amount ??
     null;
   const value = Number(raw);
   return Number.isFinite(value) ? value : null;
@@ -137,21 +150,56 @@ function amountsMatch(expected, actual) {
   return Math.abs(Number(expected) - actual) < 0.009;
 }
 
+function readPaymentStatus(source) {
+  if (!source || typeof source !== "object") return "";
+  return String(
+    source.status ||
+      source.outcome ||
+      source.content?.status ||
+      source.content?.processingInformation?.status ||
+      "",
+  ).toUpperCase();
+}
+
+function isSuccessfulPaymentStatus(status) {
+  const value = String(status || "").toUpperCase();
+  return (
+    value === "AUTHORIZED" ||
+    value === "PARTIAL_AUTHORIZED" ||
+    value === "PENDING" ||
+    value === "AUTHORIZED_PENDING_REVIEW" ||
+    value === "PENDING_REVIEW" ||
+    value === "SETTLED" ||
+    value === "SETTLING" ||
+    value === "ACCEPTED" ||
+    value === "TRANSMITTED" ||
+    value === "CAPTURED" ||
+    value === "COMPLETED" ||
+    value === "SUCCESS"
+  );
+}
+
 function paymentStatusFromPts(payload, expectedAmount) {
-  const status = String(payload?.status || "").toUpperCase();
+  const status = readPaymentStatus(payload);
   const charged = readChargedAmount(payload);
-  if (
-    status === "AUTHORIZED" ||
-    status === "PARTIAL_AUTHORIZED" ||
-    status === "PENDING" ||
-    status === "AUTHORIZED_PENDING_REVIEW" ||
-    status === "PENDING_REVIEW"
-  ) {
-    if (!Number.isFinite(charged) || charged <= 0) return "failed";
-    if (expectedAmount != null && !amountsMatch(expectedAmount, charged)) return "failed";
-    return "approved";
+  if (isSuccessfulPaymentStatus(status)) {
+    // Prefer an explicit charged amount when present. If Cybersource omits it
+    // on an otherwise successful sale, fall back to the session gift amount.
+    if (Number.isFinite(charged) && charged > 0) {
+      if (expectedAmount != null && !amountsMatch(expectedAmount, charged)) {
+        return "failed";
+      }
+      return "approved";
+    }
+    if (expectedAmount != null && Number(expectedAmount) > 0) return "approved";
+    return "failed";
   }
-  if (status === "DECLINED" || status === "AUTHORIZED_RISK_DECLINED") {
+  if (
+    status === "DECLINED" ||
+    status === "AUTHORIZED_RISK_DECLINED" ||
+    status === "AUTHENTICATION_FAILED" ||
+    status === "PENDING_AUTHENTICATION"
+  ) {
     return "declined";
   }
   return "failed";
@@ -162,23 +210,47 @@ async function enrichDonation({
   currency,
   reference,
   resultJwt,
+  paymentResult = null,
+  paymentCompleted = false,
   status = "approved",
   errorMessage = "",
 }) {
   const payload = resultJwt ? decodeJwtPayload(resultJwt) : null;
-  let jti = payload?.jti || (typeof reference === "string" ? reference : null);
+  const inlineResult =
+    paymentResult && typeof paymentResult === "object" ? paymentResult : null;
+  let jti = payload?.jti || null;
   let details = null;
   let normalizedStatus = status || "approved";
   let normalizedError = errorMessage || "";
-  let paymentId = null;
+  let paymentId =
+    inlineResult?.id ||
+    inlineResult?.transactionId ||
+    inlineResult?.reconciliationId ||
+    payload?.content?.id ||
+    payload?.content?.transactionId ||
+    payload?.transactionId ||
+    payload?.id ||
+    null;
+  if (
+    !paymentId &&
+    typeof reference === "string" &&
+    /^\d{15,}$/.test(reference.trim())
+  ) {
+    paymentId = reference.trim();
+  }
 
-  let chargedAmount = null;
+  let currencyCode = String(currency || "").toUpperCase();
+  let chargedAmount = readChargedAmount(inlineResult);
+  let paymentStatus = readPaymentStatus(inlineResult);
+  const alreadyCompleted = Boolean(paymentCompleted) || Boolean(inlineResult?.id);
 
-  // Prefer server-side PTS with the explicit gift amount. UC browser capture on
-  // this MID has produced $0 SDISCOUNT auths that looked successful in the UI.
+  // Prefer server-side PTS with the explicit gift amount when UC only returns a
+  // Flex transient token. If UC already completed the sale (completeMandate),
+  // do not capture again — verify against the payment result / TSS instead.
   if (
     resultJwt &&
     isTransientTokenPayload(payload) &&
+    !alreadyCompleted &&
     String(normalizedStatus).toLowerCase() === "approved" &&
     !String(reference || "").startsWith("SEED-")
   ) {
@@ -189,29 +261,20 @@ async function enrichDonation({
         secretKey: process.env.CYBS_SECRET_KEY,
         env: process.env.CYBS_ENV === "production" ? "production" : "test",
         amount: String(amount),
-        currency: String(currency).toUpperCase(),
+        currency: currencyCode,
         transientTokenJwt: resultJwt,
         referenceCode: `MF-${Date.now()}`,
       });
-      paymentId = payment?.id || payment?.reconciliationId || null;
+      paymentId = payment?.id || payment?.reconciliationId || paymentId;
       chargedAmount = readChargedAmount(payment);
+      paymentStatus = readPaymentStatus(payment);
       normalizedStatus = paymentStatusFromPts(payment, amount);
       if (normalizedStatus !== "approved") {
-        if (Number.isFinite(chargedAmount) && chargedAmount <= 0) {
-          normalizedError =
-            "The bank response did not collect the gift amount. Nothing was charged.";
-        } else if (
-          Number.isFinite(chargedAmount) &&
-          !amountsMatch(amount, chargedAmount)
-        ) {
-          normalizedError = `The charged amount (${chargedAmount}) did not match the gift (${amount}).`;
-        } else {
-          normalizedError =
-            payment?.errorInformation?.message ||
-            payment?.message ||
-            payment?.status ||
-            "Payment was not approved";
-        }
+        normalizedError =
+          payment?.errorInformation?.message ||
+          payment?.message ||
+          payment?.status ||
+          "Payment was not approved";
       }
       console.log(
         "[donations] captured transient token via PTS",
@@ -230,27 +293,53 @@ async function enrichDonation({
       normalizedError = String(detail || "Payment capture failed");
     }
   } else if (
-    resultJwt &&
-    payload &&
-    !isTransientTokenPayload(payload) &&
+    (inlineResult || (resultJwt && payload && !isTransientTokenPayload(payload))) &&
     String(normalizedStatus).toLowerCase() === "approved" &&
     !String(reference || "").startsWith("SEED-")
   ) {
-    // UC already orchestrated payment — only accept if the charged amount matches.
-    chargedAmount = readChargedAmount(payload);
+    const source = inlineResult || payload;
+    chargedAmount = readChargedAmount(source) ?? chargedAmount;
+    paymentStatus = readPaymentStatus(source) || paymentStatus;
     paymentId =
-      payload?.id ||
-      payload?.transactionId ||
-      payload?.content?.id ||
-      payload?.content?.transactionId ||
+      source?.id ||
+      source?.transactionId ||
+      source?.reconciliationId ||
+      source?.content?.id ||
+      source?.content?.transactionId ||
       paymentId;
+
+    if (isSuccessfulPaymentStatus(paymentStatus)) {
+      if (Number.isFinite(chargedAmount) && chargedAmount > 0) {
+        if (!amountsMatch(amount, chargedAmount)) {
+          normalizedStatus = "failed";
+          normalizedError = `The charged amount (${chargedAmount}) did not match the gift (${amount}).`;
+        } else {
+          normalizedStatus = "approved";
+        }
+      } else {
+        // Successful UC/PTS responses sometimes omit amountDetails. Use the
+        // selected gift amount and confirm via transaction lookup below.
+        normalizedStatus = "approved";
+        chargedAmount = Number(amount);
+      }
+    } else if (paymentStatus) {
+      normalizedStatus = paymentStatusFromPts(source, amount);
+      if (normalizedStatus !== "approved") {
+        normalizedError =
+          source?.errorInformation?.message ||
+          source?.message ||
+          paymentStatus ||
+          "Payment was not approved";
+      }
+    }
+  } else if (
+    alreadyCompleted &&
+    String(normalizedStatus).toLowerCase() === "approved"
+  ) {
+    // UC complete() already finished the sale. Keep the selected gift amount
+    // until Transaction Search can confirm the charged total.
     if (!Number.isFinite(chargedAmount) || chargedAmount <= 0) {
-      normalizedStatus = "failed";
-      normalizedError =
-        "The payment was not collected for the selected amount. Nothing was charged.";
-    } else if (!amountsMatch(amount, chargedAmount)) {
-      normalizedStatus = "failed";
-      normalizedError = `The charged amount (${chargedAmount}) did not match the gift (${amount}).`;
+      chargedAmount = Number(amount);
     }
   }
 
@@ -260,10 +349,37 @@ async function enrichDonation({
     console.warn("[donations] payment-details lookup failed:", error.message);
   }
 
-  const donor = pickDonorFromDetails(details, payload);
-  if (chargedAmount == null) {
-    chargedAmount = readChargedAmount(details) ?? readChargedAmount(payload);
+  // Authoritative confirmation from Transaction Search when we have a payment id.
+  if (paymentId && !String(paymentId).startsWith("SEED-")) {
+    try {
+      const txn = await lookupTransactionSafe(paymentId);
+      if (txn) {
+        const txnAmount = Number(txn.amount);
+        if (Number.isFinite(txnAmount) && txnAmount > 0) chargedAmount = txnAmount;
+        if (txn.currency) currencyCode = String(txn.currency).toUpperCase();
+        if (txn.status === "approved") {
+          normalizedStatus = "approved";
+          normalizedError = "";
+        } else if (txn.status === "declined" || txn.status === "failed") {
+          normalizedStatus = txn.status;
+          normalizedError = txn.error_message || normalizedError || txn.status;
+        }
+      }
+    } catch (error) {
+      console.warn("[donations] transaction lookup failed:", error.message);
+    }
   }
+
+  const donor = pickDonorFromDetails(details, payload || inlineResult);
+  if (chargedAmount == null) {
+    chargedAmount =
+      readChargedAmount(details) ??
+      readChargedAmount(payload) ??
+      readChargedAmount(inlineResult);
+  }
+
+  // Only treat a true zero charge as failure. Missing amount on an approved
+  // Cybersource sale should fall back to the selected gift amount.
   if (
     String(normalizedStatus).toLowerCase() === "approved" &&
     Number.isFinite(chargedAmount) &&
@@ -273,6 +389,11 @@ async function enrichDonation({
     normalizedError =
       normalizedError ||
       "The payment was not collected for the selected amount. Nothing was charged.";
+  } else if (
+    String(normalizedStatus).toLowerCase() === "approved" &&
+    !Number.isFinite(chargedAmount)
+  ) {
+    chargedAmount = Number(amount);
   }
 
   const amountFromDetails =
@@ -284,11 +405,11 @@ async function enrichDonation({
   const currencyFromDetails =
     details?.orderInformation?.amountDetails?.currency ||
     payload?.content?.orderInformation?.amountDetails?.currency?.value ||
-    currency;
+    currencyCode;
 
   return {
     amount: String(amountFromDetails),
-    currency: String(currencyFromDetails || currency).toUpperCase(),
+    currency: String(currencyFromDetails || currencyCode).toUpperCase(),
     name: donor.name,
     email: donor.email,
     reference: paymentId || jti || reference || "",

@@ -242,6 +242,8 @@
     currency,
     reference,
     resultJwt,
+    paymentResult,
+    paymentCompleted,
     errorMessage,
   }) => {
     const response = await fetch("/api/donate/complete", {
@@ -253,6 +255,8 @@
         currency,
         reference,
         result_jwt: resultJwt || "",
+        payment_result: paymentResult || null,
+        payment_completed: Boolean(paymentCompleted),
         error_message: errorMessage || "",
       }),
     });
@@ -474,8 +478,11 @@
 
   const finalizeCheckoutResult = async (mountResult) => {
     // mount() returns a transient token when autoProcessing is false. Calling
-    // complete() is what runs Payer Authentication (3DS) under completeMandate.
-    if (!isTransientToken(mountResult)) return mountResult;
+    // complete() is what runs Payer Authentication (3DS) under completeMandate
+    // and finishes the sale. Tell the server that so it does not capture again.
+    if (!isTransientToken(mountResult)) {
+      return { result: mountResult, paymentCompleted: true };
+    }
 
     if (statusEl) {
       statusEl.hidden = false;
@@ -486,18 +493,18 @@
     if (!activeCheckout || typeof activeCheckout.complete !== "function") {
       // Fall back to server PTS if complete() is unavailable.
       if (statusEl) statusEl.textContent = "Confirming your gift with the bank…";
-      return mountResult;
+      return { result: mountResult, paymentCompleted: false };
     }
 
     try {
       const completed = await activeCheckout.complete(mountResult);
-      return completed;
+      return { result: completed, paymentCompleted: true };
     } catch (error) {
       // If complete() is refused because autoProcessing already handled it,
       // keep the mount result for the server path.
       const message = String(error?.message || "");
       if (/autoProcessing|already|complete mandate/i.test(message)) {
-        return mountResult;
+        return { result: mountResult, paymentCompleted: false };
       }
       throw error;
     }
@@ -578,24 +585,30 @@
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
       measureActiveStepHeight();
-      const completeResponse = await finalizeCheckoutResult(mountResponse);
+      const finalized = await finalizeCheckoutResult(mountResponse);
       if (generation !== checkoutGeneration) return;
+      const completeResponse = finalized?.result;
+      const paymentCompleted = Boolean(finalized?.paymentCompleted);
       const reference = extractReference(completeResponse);
       const resultJwt = typeof completeResponse === "string" ? completeResponse : "";
+      const paymentResult =
+        completeResponse && typeof completeResponse === "object" ? completeResponse : null;
 
       if (statusEl) {
         statusEl.hidden = false;
         statusEl.textContent = "Recording your gift…";
       }
 
-      // Server verifies the charged amount. If UC only returned a Flex token,
-      // it captures via PTS without forcing a non-3DS commerce indicator.
+      // Server verifies against Cybersource. After UC complete(), skip a second
+      // PTS capture and confirm the final decision from the payment result / TSS.
       const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
         currency: payload.currency,
         reference,
         resultJwt,
+        paymentResult,
+        paymentCompleted,
       });
       if (generation !== checkoutGeneration) return;
 

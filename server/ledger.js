@@ -129,6 +129,20 @@ function mapOverallStatus(
     return "failed";
   }
 
+  // Payer Authentication setup/enrollment rows often carry reason 100 with no
+  // amount and no card auth. Those are not completed gifts.
+  const hasCardAuth = apps.some(
+    (app) =>
+      app.name === "ics_auth" &&
+      (String(app.rFlag || "").toUpperCase() === "SOK" || String(app.rCode) === "1"),
+  );
+  if (!Number.isFinite(charged) && !hasCardAuth) {
+    const isPayerAuthOnly = apps.length > 0 && apps.every((app) =>
+      String(app.name || "").startsWith("ics_pa_"),
+    );
+    if (isPayerAuthOnly || apps.length === 0) return "failed";
+  }
+
   if (flag === "SOK" || rCode === "1" || reason === "100") return "approved";
   if (
     flag.includes("REJECT") ||
@@ -346,7 +360,11 @@ async function searchTransactions({ from, to, limit = 500 } = {}) {
         .map(normalizeSummary)
         .filter((row) => {
           const at = new Date(row.recorded_at).getTime();
-          return Number.isFinite(at) && at >= startMs && at <= endMs;
+          if (!Number.isFinite(at) || at < startMs || at > endMs) return false;
+          // Drop payer-auth / empty-amount noise from the staff donations log.
+          const amount = Number(row.amount);
+          if (!Number.isFinite(amount) || amount <= 0) return false;
+          return true;
         }),
     );
 

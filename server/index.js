@@ -243,6 +243,8 @@ app.post("/api/donate/complete", async (req, res) => {
       currency,
       reference: req.body?.reference || "",
       resultJwt: req.body?.result_jwt || "",
+      paymentResult: req.body?.payment_result || null,
+      paymentCompleted: Boolean(req.body?.payment_completed),
       status: requestedStatus,
       errorMessage: req.body?.error_message || "",
     });
