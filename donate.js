@@ -167,11 +167,29 @@
     }, 420);
   };
 
+  const replayResultAnimations = (stepEl) => {
+    if (!stepEl) return;
+    // Force CSS animations to restart when this step becomes active again.
+    const animated = stepEl.querySelectorAll(
+      ".result-heading, .result-mark, .result-ring, .result-check, .result-cross, .result-burst span, .result-lead, .donate-thanks-actions, p",
+    );
+    animated.forEach((node) => {
+      node.style.animation = "none";
+    });
+    // Reflow so the next animation frame picks up fresh keyframes.
+    void stepEl.offsetWidth;
+    animated.forEach((node) => {
+      node.style.animation = "";
+    });
+  };
+
   const showApprovedResult = ({ amount, currency: code }) => {
     if (resultLeadEl) {
       resultLeadEl.textContent = `Thank you for your ${formatAmount(amount, code)} gift.`;
     }
+    const thanksStep = steps.find((step) => step.dataset.step === "thanks");
     setStep("thanks");
+    replayResultAnimations(thanksStep);
   };
 
   const friendlyFailureCopy = (raw) => {
@@ -233,7 +251,9 @@
             "\n\n",
         );
     }
+    const declinedStep = steps.find((step) => step.dataset.step === "declined");
     setStep("declined");
+    replayResultAnimations(declinedStep);
   };
 
   const notifyComplete = async ({

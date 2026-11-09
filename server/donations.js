@@ -105,24 +105,42 @@ async function fetchPaymentDetails(jti) {
   return null;
 }
 
+function readBillField(billTo, key) {
+  if (!billTo || typeof billTo !== "object") return "";
+  const value = billTo[key];
+  if (value && typeof value === "object" && "value" in value) {
+    return String(value.value || "").trim();
+  }
+  return String(value || "").trim();
+}
+
 function pickDonorFromDetails(details, payload) {
-  const billTo = details?.orderInformation?.billTo || {};
-  const contentBillTo = payload?.content?.orderInformation?.billTo || {};
-  const first =
-    billTo.firstName ||
-    contentBillTo.firstName?.value ||
-    contentBillTo.firstName ||
-    "";
-  const last =
-    billTo.lastName || contentBillTo.lastName?.value || contentBillTo.lastName || "";
-  const email =
-    billTo.email ||
-    contentBillTo.email?.value ||
-    contentBillTo.email ||
-    payload?.email ||
-    "";
+  const sources = [
+    details?.orderInformation?.billTo,
+    payload?.orderInformation?.billTo,
+    payload?.content?.orderInformation?.billTo,
+    payload?.data?.orderInformation?.billTo,
+    payload?.billTo,
+  ].filter(Boolean);
+
+  let first = "";
+  let last = "";
+  let email = "";
+  for (const billTo of sources) {
+    first = first || readBillField(billTo, "firstName");
+    last = last || readBillField(billTo, "lastName");
+    email = email || readBillField(billTo, "email");
+  }
+  if (!email) {
+    email = String(
+      payload?.email ||
+        payload?.content?.email ||
+        payload?.data?.email ||
+        "",
+    ).trim();
+  }
   const name = [first, last].filter(Boolean).join(" ").trim();
-  return { name, email: String(email || "").trim() };
+  return { name, email };
 }
 
 function readChargedAmount(source) {
@@ -350,20 +368,35 @@ async function enrichDonation({
   }
 
   // Authoritative confirmation from Transaction Search when we have a payment id.
+  // Retry briefly: TSS can lag a second behind Unified Checkout complete().
+  let txnDonor = { name: "", email: "" };
   if (paymentId && !String(paymentId).startsWith("SEED-")) {
+    const applyTxn = (txn) => {
+      if (!txn) return false;
+      const txnAmount = Number(txn.amount);
+      if (Number.isFinite(txnAmount) && txnAmount > 0) chargedAmount = txnAmount;
+      if (txn.currency) currencyCode = String(txn.currency).toUpperCase();
+      if (txn.status === "approved") {
+        normalizedStatus = "approved";
+        normalizedError = "";
+      } else if (txn.status === "declined" || txn.status === "failed") {
+        normalizedStatus = txn.status;
+        normalizedError = txn.error_message || normalizedError || txn.status;
+      }
+      txnDonor = {
+        name: txn.donor_name || txn.bill_to?.name || "",
+        email: txn.donor_email || txn.bill_to?.email || "",
+      };
+      return Boolean(txnDonor.email);
+    };
+
     try {
-      const txn = await lookupTransactionSafe(paymentId);
-      if (txn) {
-        const txnAmount = Number(txn.amount);
-        if (Number.isFinite(txnAmount) && txnAmount > 0) chargedAmount = txnAmount;
-        if (txn.currency) currencyCode = String(txn.currency).toUpperCase();
-        if (txn.status === "approved") {
-          normalizedStatus = "approved";
-          normalizedError = "";
-        } else if (txn.status === "declined" || txn.status === "failed") {
-          normalizedStatus = txn.status;
-          normalizedError = txn.error_message || normalizedError || txn.status;
-        }
+      let txn = await lookupTransactionSafe(paymentId);
+      let foundEmail = applyTxn(txn);
+      if (!foundEmail) {
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        txn = await lookupTransactionSafe(paymentId);
+        applyTxn(txn);
       }
     } catch (error) {
       console.warn("[donations] transaction lookup failed:", error.message);
@@ -371,6 +404,8 @@ async function enrichDonation({
   }
 
   const donor = pickDonorFromDetails(details, payload || inlineResult);
+  if (!donor.email && txnDonor.email) donor.email = String(txnDonor.email).trim();
+  if (!donor.name && txnDonor.name) donor.name = String(txnDonor.name).trim();
   if (chargedAmount == null) {
     chargedAmount =
       readChargedAmount(details) ??

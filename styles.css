@@ -1908,6 +1908,9 @@ h2 {
   gap: 14px;
   opacity: 0;
   transform: translateY(12px);
+}
+
+.donate-step.is-active .result-heading {
   animation: result-rise 560ms ease 60ms forwards;
 }
 
@@ -1917,6 +1920,9 @@ h2 {
   height: 48px;
   opacity: 0;
   transform: scale(0.7);
+}
+
+.donate-step.is-active .result-mark {
   animation: result-pop 560ms cubic-bezier(0.2, 0.9, 0.2, 1.15) 80ms forwards;
 }
 
@@ -1932,6 +1938,9 @@ h2 {
   stroke-linecap: round;
   stroke-dasharray: 140;
   stroke-dashoffset: 140;
+}
+
+.donate-step.is-active .result-ring {
   animation: result-ring 650ms ease 140ms forwards;
 }
 
@@ -1957,6 +1966,9 @@ h2 {
   stroke-linejoin: round;
   stroke-dasharray: 48;
   stroke-dashoffset: 48;
+}
+
+.donate-step.is-active .result-check {
   animation: result-mark 480ms ease 300ms forwards;
 }
 
@@ -1967,6 +1979,9 @@ h2 {
   stroke-linecap: round;
   stroke-dasharray: 36;
   stroke-dashoffset: 36;
+}
+
+.donate-step.is-active .result-cross {
   animation: result-mark 400ms ease 260ms forwards;
 }
 
@@ -1986,10 +2001,13 @@ h2 {
   background: var(--gold);
   opacity: 0;
   will-change: transform, opacity;
+}
+
+.donate-step.is-active .result-burst span {
   animation: result-spark 1600ms ease-out forwards;
 }
 
-.result-burst span:nth-child(odd) {
+.donate-step.is-active .result-burst span:nth-child(odd) {
   animation-name: result-spark-left;
 }
 
@@ -2030,15 +2048,23 @@ h2 {
 .donate-result-declined .donate-thanks-actions {
   opacity: 0;
   transform: translateY(12px);
+}
+
+.donate-step.is-active.donate-result-success .result-lead,
+.donate-step.is-active.donate-result-success > p,
+.donate-step.is-active.donate-result-success .donate-thanks-actions,
+.donate-step.is-active.donate-result-declined .result-lead,
+.donate-step.is-active.donate-result-declined > p,
+.donate-step.is-active.donate-result-declined .donate-thanks-actions {
   animation: result-rise 580ms ease forwards;
 }
 
-.donate-result-success .result-lead,
-.donate-result-declined .result-lead { animation-delay: 280ms; }
-.donate-result-success > p:not(.result-lead),
-.donate-result-declined > p:not(.result-lead) { animation-delay: 360ms; }
-.donate-result-success .donate-thanks-actions,
-.donate-result-declined .donate-thanks-actions { animation-delay: 460ms; }
+.donate-step.is-active.donate-result-success .result-lead,
+.donate-step.is-active.donate-result-declined .result-lead { animation-delay: 280ms; }
+.donate-step.is-active.donate-result-success > p:not(.result-lead),
+.donate-step.is-active.donate-result-declined > p:not(.result-lead) { animation-delay: 360ms; }
+.donate-step.is-active.donate-result-success .donate-thanks-actions,
+.donate-step.is-active.donate-result-declined .donate-thanks-actions { animation-delay: 460ms; }
 
 @keyframes result-ring {
   to { stroke-dashoffset: 0; }
