@@ -33,7 +33,7 @@ services:
         value: "false"
       - key: CYBS_ENV
         scope: RUN_TIME
-        value: test
+        value: production
       - key: MERCHANT_ID
         scope: RUN_TIME
         type: SECRET
@@ -43,9 +43,10 @@ services:
       - key: CYBS_SECRET_KEY
         scope: RUN_TIME
         type: SECRET
+      # Keep in sync with live donate hosts. Secrets UI can still override if needed.
       - key: TARGET_ORIGINS
         scope: RUN_TIME
-        type: SECRET
+        value: https://mulatiwa-foundation-2-qaz68.ondigitalocean.app,https://mulatiwafoundation.org,https://www.mulatiwafoundation.org
       - key: RESEND_API_KEY
         scope: RUN_TIME
         type: SECRET
