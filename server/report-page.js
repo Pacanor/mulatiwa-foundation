@@ -356,7 +356,12 @@ function renderRows(rows) {
         timeStyle: "short",
       });
       const status = String(row.status || "unknown");
-      const statusClass = status === "approved" ? "is-approved" : "is-failed";
+      const statusClass =
+        status === "approved"
+          ? "is-approved"
+          : status === "refunded"
+            ? "is-refunded"
+            : "is-failed";
       const money = formatMoney(row.amount, row.currency);
       return `
       <tr class="donation-row" data-row-index="${index}" data-txn-id="${escapeHtml(row.id || row.reference || "")}" tabindex="0" role="button" aria-label="View donation details">
@@ -555,6 +560,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
       font-size: 12px; font-weight: 800; letter-spacing: 0.04em; text-transform: capitalize;
     }
     .status.is-approved { background: var(--ok-soft); color: var(--ok); }
+    .status.is-refunded { background: #fff4df; color: #8a5a00; }
     .status.is-failed { background: var(--fail-soft); color: var(--fail); }
     .email-link { color: var(--blue); font-weight: 600; }
     .email-link:hover { text-decoration: underline; }
@@ -576,14 +582,9 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
     .pager-btn:disabled { opacity: 0.45; cursor: default; }
     .pager-page { min-width: 4.5rem; text-align: center; font-size: 13px; font-weight: 700; color: var(--navy); }
     .footnote { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
-    .env-banner {
-      margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; font-size: 13px; font-weight: 700; line-height: 1.45;
-    }
-    .env-banner.is-test {
-      background: #fff4df; color: #8a5a00; border: 1px solid rgba(232, 194, 58, 0.45);
-    }
-    .env-banner.is-live {
-      background: var(--ok-soft); color: var(--ok); border: 1px solid rgba(27, 127, 74, 0.22);
+    .outcome-callout {
+      margin: 0 0 18px; padding: 14px 16px; border-radius: 12px;
+      background: rgba(18, 58, 109, 0.06); color: var(--ink); font-size: 14px; line-height: 1.55;
     }
     .modal-backdrop {
       position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
@@ -701,11 +702,6 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
     <section class="panel">
       <p class="eyebrow">Staff only</p>
       <h1>Donations log</h1>
-      ${
-        String(cybsEnv || "").toLowerCase() === "production"
-          ? `<p class="env-banner is-live">Live Cybersource production · api.cybersource.com</p>`
-          : `<p class="env-banner is-test">Cybersource TEST sandbox · apitest.cybersource.com — not live card money</p>`
-      }
 
       <div class="stats">
         <div class="stat stat-ok">
@@ -765,7 +761,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
           <button type="button" class="pager-btn" id="pager-next" aria-label="Next page">Next</button>
         </div>
       </div>
-      <p class="footnote">Rows are loaded live from Cybersource Transaction Search (not a local file). Link access expires after about 7 days, so open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
+      <p class="footnote">Link access expires after about 7 days, so open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
     </section>
   </div>
   <div class="modal-backdrop" id="txn-modal" aria-hidden="true">
@@ -1012,6 +1008,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
         if (kind === "status") {
           if (upper === "APPROVED") return "tone-ok";
           if (upper === "DECLINED" || upper === "FAILED") return "tone-bad";
+          if (upper === "REFUNDED") return "tone-warn";
           return "tone-warn";
         }
         if (kind === "risk") {
@@ -1099,7 +1096,17 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
                 '?subject=' + encodeURIComponent("About your donation to Mulatiwa Foundation") +
                 '">' + tx.bill_to.email + "</a>"
               : "—";
+            var outcome =
+              tx.outcome_summary ||
+              tx.error_message ||
+              (tx.status === "approved"
+                ? "Gift authorised and accepted."
+                : "See payment and risk details below.");
+            var reversal = services.reversal || apps.find(function (app) {
+              return app.name === "ics_auth_reversal";
+            }) || {};
             setModalBody(
+              '<p class="outcome-callout">' + outcome + "</p>" +
               '<div class="detail-section"><h3>Summary</h3><div class="detail-grid">' +
                 field("When (CAT)", when) +
                 field("Status", tx.status, "status") +
@@ -1119,7 +1126,8 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations, c
                 field("Authorization", auth.status || auth.message, "risk") +
                 field("Settlement", capture.status || capture.message, "risk") +
                 field("Decision Manager", decisionMgr.status || decisionMgr.message, "risk") +
-                field("3-D Secure", payerAuthLabel) +
+                field("Authorisation reversal", reversal.status || reversal.message || "") +
+                field("3-D Secure", payerAuthLabel || "Not run") +
               "</div></div>" +
               '<div class="detail-section"><h3>Risk &amp; processor</h3><div class="detail-grid">' +
                 field("Decision message", decisionMessage) +

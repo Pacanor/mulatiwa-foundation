@@ -145,19 +145,30 @@ function mapOverallStatus(
   const decision = apps.find((app) => app.name === "ics_decision") || {};
   const decisionFlag = String(decision.rFlag || "").toUpperCase();
   const decisionReason = String(decision.reasonCode || "");
-
-  // Decision Manager reject must win over a successful auth flag. Zanaco's
-  // "Non 3Ds Reject Rule" returns reason 481 after ics_auth SOK, then reverses.
-  if (
+  const reversal = apps.find((app) => app.name === "ics_auth_reversal") || {};
+  const reversalFlag = String(reversal.rFlag || "").toUpperCase();
+  const dmRejected =
     flag.includes("REJECT") ||
     flag.includes("DECLINE") ||
     flag === "DREJECT" ||
     decisionFlag.includes("REJECT") ||
     decisionFlag.includes("DECLINE") ||
     decisionFlag === "DREJECT" ||
-    rCode === "0" ||
     reason === "481" ||
-    decisionReason === "481" ||
+    decisionReason === "481";
+  const authOk = authFlag === "SOK" || String(auth.rCode) === "1";
+
+  // Full authorisation reversal (or auth held then risk-rejected / reversed).
+  if (reversalFlag === "SOK" || String(reversal.rCode) === "1") {
+    return "refunded";
+  }
+  if (authOk && dmRejected) {
+    return "refunded";
+  }
+
+  if (
+    dmRejected ||
+    rCode === "0" ||
     reason === "203"
   ) {
     return "declined";
@@ -167,7 +178,7 @@ function mapOverallStatus(
   if (errorInformation?.message) return "failed";
   if (!flag && !rCode && !reason) {
     // Fall back to application outcomes when the summary omits overall flags.
-    if (auth && (authFlag === "SOK" || String(auth.rCode) === "1")) {
+    if (auth && authOk) {
       return "approved";
     }
   }
@@ -180,6 +191,8 @@ function explainFailure(summary) {
   const charged = Number(amountDetails.authorizedAmount ?? amountDetails.totalAmount);
   const appStatus = String(summary?.applicationInformation?.status || "").toUpperCase();
   const auth = apps.find((app) => app.name === "ics_auth") || {};
+  const reversal = apps.find((app) => app.name === "ics_auth_reversal") || {};
+  const decision = apps.find((app) => app.name === "ics_decision") || {};
   const decisionMessage = apps.find((app) =>
     String(app.rFlag || "").toUpperCase().includes("REJECT") ||
     String(app.rFlag || "").toUpperCase().includes("DECLINE") ||
@@ -192,17 +205,32 @@ function explainFailure(summary) {
     .map((rule) => rule.name)
     .filter(Boolean)
     .join(", ");
+  const authOk =
+    String(auth.rFlag || "").toUpperCase() === "SOK" || String(auth.rCode) === "1";
+  const reversalOk =
+    String(reversal.rFlag || "").toUpperCase() === "SOK" || String(reversal.rCode) === "1";
+  const dmRejected =
+    String(decision.rFlag || "").toUpperCase().includes("REJECT") ||
+    String(decision.reasonCode || "") === "481";
+
   const parts = [];
-  if (appStatus === "CANCELLED" || appStatus === "CANCELED") {
+  if (reversalOk && !auth.name) {
+    parts.push("Full authorisation reversal. Any bank hold was released, so the gift was not collected");
+  } else if (authOk && (dmRejected || reversalOk)) {
+    parts.push(
+      "Bank authorised the amount, then payment security rejected it and the authorisation was reversed. Nothing was settled",
+    );
+  } else if (appStatus === "CANCELLED" || appStatus === "CANCELED") {
     parts.push("Capture cancelled");
-  }
-  if (String(auth.rFlag || "").toUpperCase() === "SDISCOUNT" && (!Number.isFinite(charged) || charged <= 0)) {
+  } else if (String(auth.rFlag || "").toUpperCase() === "SDISCOUNT" && (!Number.isFinite(charged) || charged <= 0)) {
     parts.push("Authorised for 0.00 after discount, so the gift was not collected");
   } else if (Number.isFinite(charged) && charged <= 0) {
     parts.push("No amount was collected");
   }
   if (errorMessage && !/processed successfully/i.test(errorMessage)) parts.push(errorMessage);
-  else if (decisionMessage) parts.push(decisionMessage);
+  else if (decisionMessage && !/processed successfully/i.test(decisionMessage)) {
+    parts.push(decisionMessage);
+  }
   if (riskRules) parts.push(`Risk rule: ${riskRules}`);
   else if (riskDecision && String(riskDecision).toUpperCase() !== "ACCEPT") {
     parts.push(`Risk: ${riskDecision}`);
@@ -248,6 +276,10 @@ function normalizeSummary(summary) {
     reference: summary.id || summary.reconciliationId || "",
     client_reference: summary?.clientReferenceInformation?.code || "",
     error_message: status === "approved" ? "" : explainFailure(summary),
+    outcome_summary:
+      status === "approved"
+        ? "Gift authorised and accepted."
+        : explainFailure(summary) || `Final status: ${status}`,
     card: cardLabel(summary.paymentInformation),
     approval_code: summary?.processorInformation?.approvalCode || "",
     processor: summary?.processorInformation?.processor?.name || "",
@@ -264,6 +296,7 @@ function friendlyDetail(detail) {
   const authApp = apps.find((app) => app.name === "ics_auth") || {};
   const decisionApp = apps.find((app) => app.name === "ics_decision") || {};
   const billApp = apps.find((app) => app.name === "ics_bill") || {};
+  const reversalApp = apps.find((app) => app.name === "ics_auth_reversal") || {};
 
   return {
     ...row,
@@ -324,6 +357,11 @@ function friendlyDetail(detail) {
         status: decisionApp.rFlag || "",
         reason_code: decisionApp.reasonCode || "",
         message: decisionApp.rMessage || "",
+      },
+      reversal: {
+        status: reversalApp.rFlag || "",
+        reason_code: reversalApp.reasonCode || "",
+        message: reversalApp.rMessage || "",
       },
     },
     applications: apps.map((app) => ({
