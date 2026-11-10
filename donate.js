@@ -27,6 +27,8 @@
   const resultLeadEl = root.querySelector("[data-result-lead]");
   const failDetailEl = root.querySelector("[data-fail-detail]");
   const failMailtoEl = root.querySelector("[data-fail-mailto]");
+  const paChallengeEl = root.querySelector("[data-pa-challenge]");
+  const paFrameEl = root.querySelector("[data-pa-frame]");
   const currencyButtons = [...root.querySelectorAll("[data-currency]")];
 
   let currency = "USD";
@@ -265,6 +267,7 @@
     transientToken,
     paymentResult,
     paymentCompleted,
+    authentication,
     errorMessage,
   }) => {
     const response = await fetch("/api/donate/complete", {
@@ -277,10 +280,11 @@
         reference,
         result_jwt: resultJwt || "",
         // Mount transient token keeps bill-to/email available via Payment Details
-        // even after complete() returns a payment object without those fields.
+        // and is also used for the authenticated PTS capture after 3DS.
         transient_token: transientToken || "",
         payment_result: paymentResult || null,
         payment_completed: Boolean(paymentCompleted),
+        authentication: authentication || null,
         error_message: errorMessage || "",
       }),
     });
@@ -441,6 +445,7 @@
     checkoutGeneration += 1;
     destroyCheckout();
     clearCheckoutContainers();
+    hidePaChallenge();
     showError(checkoutError, "");
     showError(amountError, "");
     resetContinueButton();
@@ -500,38 +505,192 @@
     return null;
   };
 
-  const finalizeCheckoutResult = async (mountResult) => {
-    // mount() returns a transient token when autoProcessing is false. Calling
-    // complete() is what runs Payer Authentication (3DS) under completeMandate
-    // and finishes the sale. Tell the server that so it does not capture again.
-    if (!isTransientToken(mountResult)) {
-      return { result: mountResult, paymentCompleted: true };
-    }
+  const hidePaChallenge = () => {
+    if (paChallengeEl) paChallengeEl.hidden = true;
+    if (stage) stage.classList.remove("is-pa-challenge");
+    if (paFrameEl) paFrameEl.src = "about:blank";
+  };
 
+  const collectDeviceData = (accessToken, deviceDataCollectionUrl) =>
+    new Promise((resolve, reject) => {
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        // Cardinal sometimes finishes without a browser message; continue enroll.
+        resolve({ timed_out: true });
+      }, 12000);
+
+      const iframeName = "paDeviceDataFrame";
+      let iframe = document.getElementById("paDeviceDataFrame");
+      if (!iframe) {
+        iframe = document.createElement("iframe");
+        iframe.id = "paDeviceDataFrame";
+        iframe.name = iframeName;
+        iframe.title = "Secure device check";
+        iframe.style.cssText = "position:absolute;width:1px;height:1px;left:-9999px;border:0;";
+        document.body.appendChild(iframe);
+      }
+
+      const onMessage = (event) => {
+        if (!/cardinalcommerce\.com/i.test(String(event.origin || ""))) return;
+        cleanup();
+        resolve({ data: event.data });
+      };
+
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+      };
+
+      window.addEventListener("message", onMessage, false);
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = deviceDataCollectionUrl;
+      form.target = iframeName;
+      form.style.display = "none";
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "JWT";
+      input.value = accessToken;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
+    });
+
+  const runIssuerChallenge = (accessToken, stepUpUrl) =>
+    new Promise((resolve, reject) => {
+      if (!paChallengeEl || !paFrameEl) {
+        reject(new Error("Bank verification screen is unavailable."));
+        return;
+      }
+      paChallengeEl.hidden = false;
+      if (stage) stage.classList.add("is-pa-challenge");
+      measureActiveStepHeight();
+
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        hidePaChallenge();
+        reject(new Error("Bank verification timed out. Please try again."));
+      }, 5 * 60 * 1000);
+
+      const onMessage = (event) => {
+        const origin = String(event.origin || "");
+        if (!/cardinalcommerce\.com/i.test(origin)) return;
+        cleanup();
+        hidePaChallenge();
+        resolve({ data: event.data });
+      };
+
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        window.removeEventListener("message", onMessage);
+      };
+
+      window.addEventListener("message", onMessage, false);
+      paFrameEl.src = "about:blank";
+
+      const form = document.createElement("form");
+      form.method = "POST";
+      form.action = stepUpUrl;
+      form.target = "paChallengeFrame";
+      form.style.display = "none";
+      const input = document.createElement("input");
+      input.type = "hidden";
+      input.name = "JWT";
+      input.value = accessToken;
+      form.appendChild(input);
+      document.body.appendChild(form);
+      form.submit();
+      form.remove();
+      measureActiveStepHeight();
+    });
+
+  const browserInfo = () => ({
+    color_depth: String(window.screen?.colorDepth || 24),
+    java_enabled: false,
+    language: navigator.language || "en-US",
+    screen_height: String(window.screen?.height || 900),
+    screen_width: String(window.screen?.width || 1440),
+    time_difference: String(new Date().getTimezoneOffset()),
+    user_agent: navigator.userAgent || "",
+    return_url: `${window.location.origin}/donate.html`,
+  });
+
+  const authenticateCard = async ({ transientToken, amount, currency: code }) => {
     if (statusEl) {
       statusEl.hidden = false;
-      statusEl.textContent = "Verifying your card with 3-D Secure…";
+      statusEl.textContent = "Preparing 3-D Secure verification…";
     }
     measureActiveStepHeight();
 
-    if (!activeCheckout || typeof activeCheckout.complete !== "function") {
-      // Fall back to server PTS if complete() is unavailable.
-      if (statusEl) statusEl.textContent = "Confirming your gift with the bank…";
-      return { result: mountResult, paymentCompleted: false };
+    const setupRes = await fetch("/api/donate/payer-auth/setup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ transient_token: transientToken }),
+    });
+    const setup = await setupRes.json().catch(() => ({}));
+    if (!setupRes.ok) {
+      throw new Error(setup.error || "Could not start card verification.");
     }
 
-    try {
-      const completed = await activeCheckout.complete(mountResult);
-      return { result: completed, paymentCompleted: true };
-    } catch (error) {
-      // If complete() is refused because autoProcessing already handled it,
-      // keep the mount result for the server path.
-      const message = String(error?.message || "");
-      if (/autoProcessing|already|complete mandate/i.test(message)) {
-        return { result: mountResult, paymentCompleted: false };
-      }
-      throw error;
+    if (statusEl) statusEl.textContent = "Verifying your card with 3-D Secure…";
+    await collectDeviceData(setup.access_token, setup.device_data_collection_url);
+
+    const enrollRes = await fetch("/api/donate/payer-auth/enroll", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        transient_token: transientToken,
+        reference_id: setup.reference_id,
+        amount,
+        currency: code,
+        browser: browserInfo(),
+      }),
+    });
+    const enrolled = await enrollRes.json().catch(() => ({}));
+    if (!enrollRes.ok) {
+      throw new Error(enrolled.error || "Could not verify this card.");
     }
+
+    let authResult = enrolled;
+    if (String(enrolled.status || "").toUpperCase() === "PENDING_AUTHENTICATION") {
+      if (!enrolled.step_up_url || !enrolled.access_token) {
+        throw new Error("Your bank asked for verification, but the challenge could not be opened.");
+      }
+      if (statusEl) statusEl.textContent = "Enter the one-time code from your bank…";
+      await runIssuerChallenge(enrolled.access_token, enrolled.step_up_url);
+
+      const validateRes = await fetch("/api/donate/payer-auth/validate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          authentication_transaction_id: enrolled.authentication_transaction_id,
+          amount,
+          currency: code,
+        }),
+      });
+      const validated = await validateRes.json().catch(() => ({}));
+      if (!validateRes.ok) {
+        throw new Error(validated.error || "Bank verification did not finish.");
+      }
+      authResult = validated;
+    }
+
+    const status = String(authResult.status || "").toUpperCase();
+    if (status !== "AUTHENTICATION_SUCCESSFUL") {
+      throw new Error("Your bank could not authenticate this card. Try a different card.");
+    }
+
+    return {
+      authentication_transaction_id: authResult.authentication_transaction_id || "",
+      eci: authResult.eci || "",
+      cavv: authResult.cavv || "",
+      xid: authResult.xid || "",
+      directory_server_transaction_id: authResult.directory_server_transaction_id || "",
+      spec_version: authResult.spec_version || "",
+      commerce_indicator: authResult.commerce_indicator || "",
+    };
   };
 
   const startCheckout = async () => {
@@ -590,8 +749,8 @@
       if (generation !== checkoutGeneration) return;
 
       const walletPending = startWalletButtons(activeClient);
-      // Collect card details first, then complete() so Unified Checkout can run 3DS
-      // under completeMandate.consumerAuthentication before the sale is finished.
+      // Collect card details only. 3DS + capture run on our server after mount,
+      // because UC completeMandate was authorizing without Payer Authentication.
       activeCheckout = await activeClient.createCheckout({
         autoProcessing: false,
       });
@@ -609,38 +768,44 @@
       const mountResponse = await Promise.race([cardPending, ...walletPending]);
       if (generation !== checkoutGeneration) return;
       measureActiveStepHeight();
-      const transientToken = isTransientToken(mountResponse) ? mountResponse : "";
-      const finalized = await finalizeCheckoutResult(mountResponse);
+
+      const transientToken = isTransientToken(mountResponse)
+        ? mountResponse
+        : typeof mountResponse === "string"
+          ? mountResponse
+          : "";
+      if (!transientToken) {
+        throw new Error("We couldn't secure the card details. Please try again.");
+      }
+
+      const authentication = await authenticateCard({
+        transientToken,
+        amount: payload.amount,
+        currency: payload.currency,
+      });
       if (generation !== checkoutGeneration) return;
-      const completeResponse = finalized?.result;
-      const paymentCompleted = Boolean(finalized?.paymentCompleted);
-      const reference = extractReference(completeResponse);
-      const resultJwt = typeof completeResponse === "string" ? completeResponse : "";
-      const paymentResult =
-        completeResponse && typeof completeResponse === "object" ? completeResponse : null;
 
       if (statusEl) {
         statusEl.hidden = false;
         statusEl.textContent = "Recording your gift…";
       }
 
-      // Server verifies against Cybersource. After UC complete(), skip a second
-      // PTS capture and confirm the final decision from the payment result / TSS.
-      // Keep the mount transient token so Payment Details can return donor email.
       const recorded = await notifyComplete({
         status: "approved",
         amount: payload.amount,
         currency: payload.currency,
-        reference,
-        resultJwt,
+        reference: extractReference(transientToken),
+        resultJwt: transientToken,
         transientToken,
-        paymentResult,
-        paymentCompleted,
+        paymentResult: null,
+        paymentCompleted: false,
+        authentication,
       });
       if (generation !== checkoutGeneration) return;
 
       destroyCheckout();
       clearCheckoutContainers();
+      hidePaChallenge();
 
       if (recorded?.status && recorded.status !== "approved") {
         showDeclinedResult(recorded.error_message || recorded.status);
@@ -653,6 +818,7 @@
       });
     } catch (error) {
       if (generation !== checkoutGeneration) return;
+      hidePaChallenge();
       console.error("[donate]", error);
       const rawMessage = error?.message && typeof error.message === "string" ? error.message : "";
       const reason = error?.reason || "";

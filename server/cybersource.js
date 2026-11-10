@@ -106,13 +106,10 @@ async function createCaptureContext({
       showConfirmationStep: false,
       showAcceptedNetworkIcons: true,
     },
-    // Required for PAN-entry 3DS: BC enabling 3DS alone is not enough. UC only
-    // runs Payer Authentication when completeMandate.consumerAuthentication is
-    // "3DS" (or PASSKEY) and the client calls complete() / autoProcessing.
-    completeMandate: {
-      type: "CAPTURE",
-      consumerAuthentication: "3DS",
-    },
+    // Do not use completeMandate here. On this MID, Unified Checkout was
+    // authorizing without running Payer Authentication (no OTP / no ECI), which
+    // Decision Manager then rejected. We collect a transient token in UC, run
+    // EMV 3DS via the Payer Authentication APIs, then capture with PTS.
     appearance: {
       theme: "LIGHT",
       variables: {
@@ -217,6 +214,7 @@ async function createPaymentWithTransientToken({
   currency,
   transientTokenJwt,
   referenceCode,
+  consumerAuthenticationInformation = null,
 }) {
   const host = getHost(env);
   const resourcePath = "/pts/v2/payments";
@@ -228,7 +226,7 @@ async function createPaymentWithTransientToken({
       capture: true,
       // Do not force commerceIndicator: "internet". That marks the sale as
       // non-authenticated (ECI 7) and trips the MID's "Non 3ds Rule". Prefer
-      // the indicator carried by an authenticated Unified Checkout token.
+      // the indicator from a completed Payer Authentication challenge.
     },
     tokenInformation: {
       transientTokenJwt,
@@ -240,6 +238,17 @@ async function createPaymentWithTransientToken({
       },
     },
   };
+  if (
+    consumerAuthenticationInformation &&
+    typeof consumerAuthenticationInformation === "object" &&
+    Object.keys(consumerAuthenticationInformation).length
+  ) {
+    bodyObject.consumerAuthenticationInformation = consumerAuthenticationInformation;
+    if (consumerAuthenticationInformation.ecommerceIndicator) {
+      bodyObject.processingInformation.commerceIndicator =
+        consumerAuthenticationInformation.ecommerceIndicator;
+    }
+  }
 
   const body = JSON.stringify(bodyObject);
   const date = new Date().toUTCString();

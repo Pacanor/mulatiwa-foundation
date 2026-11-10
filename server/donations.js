@@ -231,6 +231,7 @@ async function enrichDonation({
   transientToken = "",
   paymentResult = null,
   paymentCompleted = false,
+  authentication = null,
   status = "approved",
   errorMessage = "",
 }) {
@@ -265,12 +266,18 @@ async function enrichDonation({
   let paymentStatus = readPaymentStatus(inlineResult);
   const alreadyCompleted = Boolean(paymentCompleted) || Boolean(inlineResult?.id);
 
+  const captureToken =
+    (transientToken && isTransientTokenPayload(transientPayload) && transientToken) ||
+    (resultJwt && isTransientTokenPayload(payload) && resultJwt) ||
+    "";
+  const authInfo =
+    authentication && typeof authentication === "object" ? authentication : null;
+
   // Prefer server-side PTS with the explicit gift amount when UC only returns a
-  // Flex transient token. If UC already completed the sale (completeMandate),
-  // do not capture again — verify against the payment result / TSS instead.
+  // Flex transient token. Include Payer Authentication results so Decision
+  // Manager sees a real ECI instead of rejecting non-3DS authorisations.
   if (
-    resultJwt &&
-    isTransientTokenPayload(payload) &&
+    captureToken &&
     !alreadyCompleted &&
     String(normalizedStatus).toLowerCase() === "approved" &&
     !String(reference || "").startsWith("SEED-")
@@ -283,8 +290,9 @@ async function enrichDonation({
         env: resolveCybsEnv(),
         amount: String(amount),
         currency: currencyCode,
-        transientTokenJwt: resultJwt,
+        transientTokenJwt: captureToken,
         referenceCode: `MF-${Date.now()}`,
+        consumerAuthenticationInformation: authInfo,
       });
       paymentId = payment?.id || payment?.reconciliationId || paymentId;
       chargedAmount = readChargedAmount(payment);
