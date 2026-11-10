@@ -8,12 +8,6 @@ const cron = require("node-cron");
 const { createCaptureContext, resolveCybsEnv, getHost } = require("./cybersource");
 const { enrichDonation } = require("./donations");
 const {
-  setupPayerAuth,
-  enrollPayerAuth,
-  validatePayerAuth,
-  authenticationPayloadForPayment,
-} = require("./payer-auth");
-const {
   recordDonation,
   ledgerReady,
   getTransaction,
@@ -232,84 +226,6 @@ app.post("/api/donate/session", async (req, res) => {
   }
 });
 
-app.post("/api/donate/payer-auth/setup", async (req, res) => {
-  try {
-    const transientToken = String(req.body?.transient_token || "").trim();
-    if (!transientToken) {
-      return res.status(400).json({ error: "Missing payment token." });
-    }
-    const setup = await setupPayerAuth({
-      transientToken,
-      referenceCode: `MF-PA-${Date.now()}`,
-    });
-    return res.json({ ok: true, ...setup });
-  } catch (error) {
-    console.error("[donate/payer-auth/setup]", error.message, error.details || "");
-    return res.status(502).json({
-      error: "We couldn't start card verification. Please try again.",
-      detail: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
-app.post("/api/donate/payer-auth/enroll", async (req, res) => {
-  try {
-    const transientToken = String(req.body?.transient_token || "").trim();
-    const referenceId = String(req.body?.reference_id || "").trim();
-    const currency = String(req.body?.currency || "")
-      .trim()
-      .toUpperCase();
-    const amount = normalizeAmount(req.body?.amount, currency);
-    if (!transientToken || !referenceId || !amount || !ALLOWED_CURRENCIES.has(currency)) {
-      return res.status(400).json({ error: "Invalid authentication details." });
-    }
-    const enrolled = await enrollPayerAuth({
-      transientToken,
-      referenceId,
-      referenceCode: `MF-PA-${Date.now()}`,
-      amount,
-      currency,
-      browserInformation: req.body?.browser || {},
-      billTo: req.body?.bill_to || {},
-    });
-    return res.json({ ok: true, ...enrolled });
-  } catch (error) {
-    console.error("[donate/payer-auth/enroll]", error.message, error.details || "");
-    return res.status(502).json({
-      error: "We couldn't verify this card with 3-D Secure. Please try again.",
-      detail: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
-app.post("/api/donate/payer-auth/validate", async (req, res) => {
-  try {
-    const authenticationTransactionId = String(
-      req.body?.authentication_transaction_id || "",
-    ).trim();
-    const currency = String(req.body?.currency || "")
-      .trim()
-      .toUpperCase();
-    const amount = normalizeAmount(req.body?.amount, currency);
-    if (!authenticationTransactionId || !amount || !ALLOWED_CURRENCIES.has(currency)) {
-      return res.status(400).json({ error: "Invalid authentication details." });
-    }
-    const validated = await validatePayerAuth({
-      authenticationTransactionId,
-      referenceCode: `MF-PA-${Date.now()}`,
-      amount,
-      currency,
-    });
-    return res.json({ ok: true, ...validated });
-  } catch (error) {
-    console.error("[donate/payer-auth/validate]", error.message, error.details || "");
-    return res.status(502).json({
-      error: "Card verification did not finish. Please try again.",
-      detail: process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
 app.post("/api/donate/complete", async (req, res) => {
   try {
     const status = String(req.body?.status || "approved").toLowerCase();
@@ -332,7 +248,6 @@ app.post("/api/donate/complete", async (req, res) => {
       transientToken: req.body?.transient_token || "",
       paymentResult: req.body?.payment_result || null,
       paymentCompleted: Boolean(req.body?.payment_completed),
-      authentication: authenticationPayloadForPayment(req.body?.authentication || null),
       status: requestedStatus,
       errorMessage: req.body?.error_message || "",
     });

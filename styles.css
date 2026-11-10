@@ -1622,41 +1622,6 @@ h2 {
   transition: height 420ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.donate-panel:has(.donate-stage.is-pa-challenge) {
-  overflow: visible;
-}
-
-.donate-stage.is-pa-challenge {
-  overflow: visible;
-  /* Challenge iframe is tall; let the stage grow past the UC form height. */
-  min-height: 520px;
-}
-
-.pa-challenge {
-  margin-top: 18px;
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(18, 58, 109, 0.05);
-  border: 1px solid rgba(18, 58, 109, 0.12);
-}
-
-.pa-challenge-copy {
-  margin: 0 0 12px;
-  color: var(--navy);
-  font-size: 0.98rem;
-  font-weight: 700;
-  line-height: 1.45;
-}
-
-.pa-challenge-frame {
-  display: block;
-  width: 100%;
-  min-height: 420px;
-  border: 0;
-  border-radius: 14px;
-  background: #fff;
-}
-
 .donate-step {
   opacity: 0;
   visibility: hidden;
