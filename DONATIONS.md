@@ -187,33 +187,43 @@ npm start
 
 ## Production 3-D Secure (blocking OTP / DM rejects)
 
-Test Business Center can show the OTP modal while production does not. That is **not** a donate.js regression: production Unified Checkout is authorizing without Payer Authentication.
+### Confirmed by API (same MID, test vs production)
 
-Observed on live MID `zanaco_mulatiwafou`:
+| Check | Test (`apitest`) | Production (`api`) |
+| --- | --- | --- |
+| Payer Authentication setup (`POST /risk/v1/authentication-setups`) | Works (Cardinal staging org unit) | Works (Cardinal live org unit) |
+| Unified Checkout sales with `ics_pa_*` | Yes — enroll `475` then validate, ECI **5** | **No** — auth only, ECI **7** |
+| Decision Manager | Accepts authenticated sales | Rejects with **`Non 3Ds Reject Rule - ECI Not presented` (481)** |
 
-- Sessions request includes `completeMandate.consumerAuthentication: "3DS"`
-- Capture-context JWT returns `completeMandate` with `type` only (no `consumerAuthentication`)
-- Sale apps are `ics_auth` + `ics_decision` — **no** `ics_pa_setup` / `ics_pa_enroll` / `ics_pa_validate`
-- Auth uses `commerceIndicator` / ECI **7** (internet / non-authenticated)
-- Decision Manager rule **`Non 3Ds Reject Rule - ECI Not presented`** returns reason **481** and the auth is reversed
+So “3DS is configured” is true for **Payer Authentication / Cardinal**. What is still missing in production is **Unified Checkout orchestrating PA on `complete()`** (the path that showed the OTP in test).
 
-Ask Zanaco / Cybersource to complete this in the **production** Business Center (`https://businesscenter.cybersource.com`), not the test one:
+Merchant REST keys cannot read boarding config (`/oms/v1/organizations` → 400). Confirmation is portal + transaction apps.
 
-1. **Payer Authentication boarded** for the transacting MID  
-   Payment Configuration → Payer Authentication → enable **Visa Secure** and **Mastercard Identity Check** with the acquirer merchant ID + acquirer BIN Zanaco provides.
-2. **Unified Checkout Complete Mandate**  
-   Payment Configuration → Unified Checkout → Complete Mandate → Consumer Authentication = **3DS** (API default alone is not enough if the processor profile will not run PA).
-3. **Card networks**  
-   Confirm Visa **and** Mastercard are enabled for Unified Checkout PAN entry (production sessions have been returning Visa only).
-4. Confirm the processor supports 3-D Secure for this MID (Cybersource docs: UC only runs 3DS when the payment processor supports it).
+### Portal checklist (compare Test and Production side by side)
 
-After that, retest a low-value live gift. Success looks like:
+**Test:** https://businesscentertest.cybersource.com/ebc2  
+**Production:** https://businesscenter.cybersource.com
 
-- OTP / bank challenge appears when the issuer requires it (or frictionless 3DS with a real ECI, not 7)
-- Transaction apps include `ics_pa_*` together with `ics_auth`
-- Decision Manager no longer rejects for “ECI Not presented”
+1. **Payment Configuration → Payer Authentication Configuration**  
+   Confirm Visa Secure / Mastercard Identity Check credentials exist (Org Unit ID present). Production setup API already proves this is boarded.
+2. **Payment Configuration → Unified Checkout → Customer information and payment flow → Manage**  
+   - **Payment processing** = ON (Sale / CAPTURE)  
+   - Look for **Consumer authentication / 3-D Secure** (Complete Mandate). Must be **3DS**, not NONE.  
+   - Fraud / Decision Manager as required.
+3. **Payment Configuration → Unified Checkout → Payment options**  
+   Confirm **Visa** and **Mastercard** for card / PAN entry (sessions currently return Visa only).
+4. **Transaction Management**  
+   Open a recent test gift that showed OTP: apps should include `ics_pa_enroll` / `ics_pa_validate`.  
+   Open a recent production gift: apps are `ics_auth` + `ics_decision` only.
 
-`GET /api/health` → `payer_auth_via_uc.likely_missing_uc_3ds` stays `true` until a recent authorization includes Payer Authentication apps.
+If production UC has Payment processing ON but still never shows `ics_pa_*`, ask Zanaco/Client Services to enable **Payer Authentication in the Unified Checkout service-orchestration / Complete Mandate profile** for the live MID (processor must support 3DS for UC). Cite [UC consumerAuthentication](https://developer.cybersource.com/docs/cybs/en-us/unified-checkout/developer/all/rest/unified-checkout/uc-setup-capture-context/uc-capture-context-features/uc-cc-complete-mandate/uc-cc-complete-auth.html) and [3DS setup troubleshooting](https://support.visaacceptance.com/knowledgebase/article/000002056/en-us).
+
+### Success criteria after the portal fix
+
+- OTP / bank challenge appears when the issuer requires it  
+- Transaction apps include `ics_pa_*` with `ics_auth`  
+- ECI is not **7**; DM no longer rejects for “ECI Not presented”  
+- `GET /api/health` → `payer_auth_via_uc.likely_missing_uc_3ds` becomes `false`
 
 ## Emails + Cybersource ledger
 
