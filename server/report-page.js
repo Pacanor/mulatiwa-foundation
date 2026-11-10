@@ -388,7 +388,7 @@ function resolveRange({ periodInput, fromInput, toInput }) {
   return { period, ...rangeForPreset(period) };
 }
 
-function renderReportPage({ periodInput, fromInput, toInput, token, donations }) {
+function renderReportPage({ periodInput, fromInput, toInput, token, donations, cybsEnv }) {
   const nextToken = createReportToken() || token;
   const { period, from, to, fromValue, toValue } = resolveRange({
     periodInput,
@@ -576,6 +576,15 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     .pager-btn:disabled { opacity: 0.45; cursor: default; }
     .pager-page { min-width: 4.5rem; text-align: center; font-size: 13px; font-weight: 700; color: var(--navy); }
     .footnote { margin: 22px 0 0; color: var(--muted); font-size: 13px; }
+    .env-banner {
+      margin: 0 0 18px; padding: 12px 14px; border-radius: 12px; font-size: 13px; font-weight: 700; line-height: 1.45;
+    }
+    .env-banner.is-test {
+      background: #fff4df; color: #8a5a00; border: 1px solid rgba(232, 194, 58, 0.45);
+    }
+    .env-banner.is-live {
+      background: var(--ok-soft); color: var(--ok); border: 1px solid rgba(27, 127, 74, 0.22);
+    }
     .modal-backdrop {
       position: fixed; inset: 0; display: grid; place-items: center; padding: 24px;
       background: rgba(12, 28, 48, 0.52); backdrop-filter: blur(4px); z-index: 40;
@@ -692,6 +701,11 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
     <section class="panel">
       <p class="eyebrow">Staff only</p>
       <h1>Donations log</h1>
+      ${
+        String(cybsEnv || "").toLowerCase() === "production"
+          ? `<p class="env-banner is-live">Live Cybersource production · api.cybersource.com</p>`
+          : `<p class="env-banner is-test">Cybersource TEST sandbox · apitest.cybersource.com — not live card money</p>`
+      }
 
       <div class="stats">
         <div class="stat stat-ok">
@@ -751,7 +765,7 @@ function renderReportPage({ periodInput, fromInput, toInput, token, donations })
           <button type="button" class="pager-btn" id="pager-next" aria-label="Next page">Next</button>
         </div>
       </div>
-      <p class="footnote">Data is loaded live from Cybersource. Link access expires after about 7 days, so open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
+      <p class="footnote">Rows are loaded live from Cybersource Transaction Search (not a local file). Link access expires after about 7 days, so open a fresh link from a staff donation email when needed. Click a row for full payment details.</p>
     </section>
   </div>
   <div class="modal-backdrop" id="txn-modal" aria-hidden="true">

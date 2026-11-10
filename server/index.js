@@ -157,9 +157,12 @@ app.get("/api/health", async (_req, res) => {
   } catch {
     donationCount = 0;
   }
+  const cybsEnv = process.env.CYBS_ENV === "production" ? "production" : "test";
   res.json({
     status: "ok",
-    cybs_env: process.env.CYBS_ENV || "test",
+    cybs_env: cybsEnv,
+    cybs_api_host:
+      cybsEnv === "production" ? "api.cybersource.com" : "apitest.cybersource.com",
     donate_ready: Boolean(
       process.env.MERCHANT_ID && process.env.CYBS_KEY_ID && process.env.CYBS_SECRET_KEY,
     ),
@@ -339,6 +342,7 @@ app.get("/internal/giving", async (req, res) => {
         toInput: req.query.to,
         token,
         donations,
+        cybsEnv: process.env.CYBS_ENV === "production" ? "production" : "test",
       }),
     );
   } catch (error) {
