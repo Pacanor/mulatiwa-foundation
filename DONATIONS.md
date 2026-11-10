@@ -185,6 +185,36 @@ npm start
 4. Redeploy; run one real low-value test gift in each currency; verify settlement with Zanaco.
 5. Keep sandbox keys out of production env.
 
+## Production 3-D Secure (blocking OTP / DM rejects)
+
+Test Business Center can show the OTP modal while production does not. That is **not** a donate.js regression: production Unified Checkout is authorizing without Payer Authentication.
+
+Observed on live MID `zanaco_mulatiwafou`:
+
+- Sessions request includes `completeMandate.consumerAuthentication: "3DS"`
+- Capture-context JWT returns `completeMandate` with `type` only (no `consumerAuthentication`)
+- Sale apps are `ics_auth` + `ics_decision` — **no** `ics_pa_setup` / `ics_pa_enroll` / `ics_pa_validate`
+- Auth uses `commerceIndicator` / ECI **7** (internet / non-authenticated)
+- Decision Manager rule **`Non 3Ds Reject Rule - ECI Not presented`** returns reason **481** and the auth is reversed
+
+Ask Zanaco / Cybersource to complete this in the **production** Business Center (`https://businesscenter.cybersource.com`), not the test one:
+
+1. **Payer Authentication boarded** for the transacting MID  
+   Payment Configuration → Payer Authentication → enable **Visa Secure** and **Mastercard Identity Check** with the acquirer merchant ID + acquirer BIN Zanaco provides.
+2. **Unified Checkout Complete Mandate**  
+   Payment Configuration → Unified Checkout → Complete Mandate → Consumer Authentication = **3DS** (API default alone is not enough if the processor profile will not run PA).
+3. **Card networks**  
+   Confirm Visa **and** Mastercard are enabled for Unified Checkout PAN entry (production sessions have been returning Visa only).
+4. Confirm the processor supports 3-D Secure for this MID (Cybersource docs: UC only runs 3DS when the payment processor supports it).
+
+After that, retest a low-value live gift. Success looks like:
+
+- OTP / bank challenge appears when the issuer requires it (or frictionless 3DS with a real ECI, not 7)
+- Transaction apps include `ics_pa_*` together with `ics_auth`
+- Decision Manager no longer rejects for “ECI Not presented”
+
+`GET /api/health` → `payer_auth_via_uc.likely_missing_uc_3ds` stays `true` until a recent authorization includes Payer Authentication apps.
+
 ## Emails + Cybersource ledger
 
 After each gift attempt the server:

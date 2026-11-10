@@ -200,11 +200,11 @@
       return "We couldn't complete this gift. Try again, or write to us if you need help.";
     }
     if (
-      /decision is reject|decision manager|non[- ]?3ds|risk rule|reason 481|\b481\b/i.test(
+      /decision is reject|decision manager|non[- ]?3ds|eci not presented|risk rule|reason 481|\b481\b/i.test(
         text,
       )
     ) {
-      return "Our payment security check couldn't approve this card. Try a different card, or check the details and try again.";
+      return "Bank verification (3-D Secure) did not complete for this card, so the gift was not taken. Try again in a moment, or use a different card.";
     }
     if (/insufficient|funds|balance/i.test(text)) {
       return "Your bank said there weren't enough funds for this gift. Try another card, or try again later.";

@@ -200,12 +200,51 @@ async function createCaptureContext({
   }
 
   const { clientLibrary, clientLibraryIntegrity } = extractClientLibrary(captureContext);
+  const sessionSummary = summarizeCaptureContext(captureContext);
+  // Production has been accepting consumerAuthentication:"3DS" on the Sessions
+  // request while omitting it from the capture-context JWT and never running
+  // ics_pa_* on complete(). Log that so ops can tell UC 3DS is not active.
+  if (
+    bodyObject?.completeMandate?.consumerAuthentication &&
+    bodyObject.completeMandate.consumerAuthentication !== "NONE" &&
+    !sessionSummary.consumer_authentication
+  ) {
+    console.warn(
+      "[cybersource] Sessions accepted consumerAuthentication=%s but capture context has no consumerAuthentication (networks=%s). Unified Checkout will not show an OTP until Payer Authentication is boarded for this production MID.",
+      bodyObject.completeMandate.consumerAuthentication,
+      (sessionSummary.allowed_card_networks || []).join(",") || "none",
+    );
+  }
 
   return {
     capture_context: captureContext,
     client_library: clientLibrary,
     client_library_integrity: clientLibraryIntegrity,
+    session_summary: sessionSummary,
   };
+}
+
+function summarizeCaptureContext(captureContextJwt) {
+  try {
+    const payload = decodeJwtPayload(captureContextJwt);
+    const data = payload?.ctx?.[0]?.data || payload?.data || {};
+    const mandate = data.completeMandate || {};
+    return {
+      complete_mandate_type: mandate.type || null,
+      consumer_authentication: mandate.consumerAuthentication || null,
+      allowed_payment_types: data.allowedPaymentTypes || [],
+      allowed_card_networks: data.allowedCardNetworks || [],
+      country: data.country || null,
+    };
+  } catch {
+    return {
+      complete_mandate_type: null,
+      consumer_authentication: null,
+      allowed_payment_types: [],
+      allowed_card_networks: [],
+      country: null,
+    };
+  }
 }
 
 async function createPaymentWithTransientToken({
@@ -290,6 +329,7 @@ async function createPaymentWithTransientToken({
 module.exports = {
   createCaptureContext,
   createPaymentWithTransientToken,
+  summarizeCaptureContext,
   getHost,
   resolveCybsEnv,
 };
