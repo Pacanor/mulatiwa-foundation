@@ -5,7 +5,7 @@ const https = require("https");
 const express = require("express");
 const dotenv = require("dotenv");
 const cron = require("node-cron");
-const { createCaptureContext } = require("./cybersource");
+const { createCaptureContext, resolveCybsEnv, getHost } = require("./cybersource");
 const { enrichDonation } = require("./donations");
 const {
   recordDonation,
@@ -157,12 +157,11 @@ app.get("/api/health", async (_req, res) => {
   } catch {
     donationCount = 0;
   }
-  const cybsEnv = process.env.CYBS_ENV === "production" ? "production" : "test";
+  const cybsEnv = resolveCybsEnv();
   res.json({
     status: "ok",
     cybs_env: cybsEnv,
-    cybs_api_host:
-      cybsEnv === "production" ? "api.cybersource.com" : "apitest.cybersource.com",
+    cybs_api_host: getHost(cybsEnv),
     donate_ready: Boolean(
       process.env.MERCHANT_ID && process.env.CYBS_KEY_ID && process.env.CYBS_SECRET_KEY,
     ),
@@ -204,7 +203,7 @@ app.post("/api/donate/session", async (req, res) => {
       merchantId: requireEnv("MERCHANT_ID"),
       keyId: requireEnv("CYBS_KEY_ID"),
       secretKey: requireEnv("CYBS_SECRET_KEY"),
-      env: process.env.CYBS_ENV === "production" ? "production" : "test",
+      env: resolveCybsEnv(),
       targetOrigins: [requestOrigin],
       amount,
       currency,
@@ -342,7 +341,7 @@ app.get("/internal/giving", async (req, res) => {
         toInput: req.query.to,
         token,
         donations,
-        cybsEnv: process.env.CYBS_ENV === "production" ? "production" : "test",
+        cybsEnv: resolveCybsEnv(),
       }),
     );
   } catch (error) {
@@ -540,7 +539,7 @@ const httpsOptions = useHttps ? loadDevHttpsOptions() : null;
 
 function logLedgerStartup() {
   console.log(
-    `[ledger] source=cybersource ready=${ledgerReady()} env=${process.env.CYBS_ENV || "test"}`,
+    `[ledger] source=cybersource ready=${ledgerReady()} env=${resolveCybsEnv()}`,
   );
 }
 

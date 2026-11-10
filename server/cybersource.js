@@ -9,6 +9,13 @@ function getHost(env) {
   return HOSTS[env] || HOSTS.test;
 }
 
+/** Normalize CYBS_ENV so "production ", "Production", "prod" all resolve live. */
+function resolveCybsEnv(raw = process.env.CYBS_ENV) {
+  const value = String(raw || "test").trim().toLowerCase();
+  if (value === "production" || value === "prod" || value === "live") return "production";
+  return "test";
+}
+
 function createDigest(body) {
   const hash = crypto.createHash("sha256").update(body, "utf8").digest("base64");
   return `SHA-256=${hash}`;
@@ -284,4 +291,5 @@ module.exports = {
   createCaptureContext,
   createPaymentWithTransientToken,
   getHost,
+  resolveCybsEnv,
 };

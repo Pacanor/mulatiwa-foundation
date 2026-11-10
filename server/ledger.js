@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { getHost } = require("./cybersource");
+const { getHost, resolveCybsEnv } = require("./cybersource");
 
 const TIME_ZONE = "Africa/Lusaka";
 
@@ -44,8 +44,7 @@ async function cybsRequest({ method, resourcePath, bodyObject }) {
   if (!creds) {
     throw new Error("Cybersource credentials are not configured");
   }
-  const env = process.env.CYBS_ENV === "production" ? "production" : "test";
-  const host = getHost(env);
+  const host = getHost(resolveCybsEnv());
   const body = bodyObject ? JSON.stringify(bodyObject) : null;
   const date = new Date().toUTCString();
   const digest = body

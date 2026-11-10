@@ -1,4 +1,4 @@
-const { getHost, createPaymentWithTransientToken } = require("./cybersource");
+const { getHost, createPaymentWithTransientToken, resolveCybsEnv } = require("./cybersource");
 const crypto = require("crypto");
 
 function lookupTransactionSafe(id) {
@@ -66,7 +66,7 @@ async function fetchPaymentDetails(jti) {
   const secretKey = process.env.CYBS_SECRET_KEY;
   if (!merchantId || !keyId || !secretKey) return null;
 
-  const host = getHost(process.env.CYBS_ENV === "production" ? "production" : "test");
+  const host = getHost(resolveCybsEnv());
   // Documented UC Payment Details path first, then alternate hosts used by older docs.
   const candidates = [
     `/flex/v2/payment-details/${encodeURIComponent(jti)}`,
@@ -280,7 +280,7 @@ async function enrichDonation({
         merchantId: process.env.MERCHANT_ID,
         keyId: process.env.CYBS_KEY_ID,
         secretKey: process.env.CYBS_SECRET_KEY,
-        env: process.env.CYBS_ENV === "production" ? "production" : "test",
+        env: resolveCybsEnv(),
         amount: String(amount),
         currency: currencyCode,
         transientTokenJwt: resultJwt,
