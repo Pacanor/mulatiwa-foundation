@@ -142,24 +142,31 @@ function mapOverallStatus(
     if (isPayerAuthOnly || apps.length === 0) return "failed";
   }
 
-  if (flag === "SOK" || rCode === "1" || reason === "100") return "approved";
+  const decision = apps.find((app) => app.name === "ics_decision") || {};
+  const decisionFlag = String(decision.rFlag || "").toUpperCase();
+  const decisionReason = String(decision.reasonCode || "");
+
+  // Decision Manager reject must win over a successful auth flag. Zanaco's
+  // "Non 3Ds Reject Rule" returns reason 481 after ics_auth SOK, then reverses.
   if (
     flag.includes("REJECT") ||
     flag.includes("DECLINE") ||
     flag === "DREJECT" ||
+    decisionFlag.includes("REJECT") ||
+    decisionFlag.includes("DECLINE") ||
+    decisionFlag === "DREJECT" ||
     rCode === "0" ||
     reason === "481" ||
+    decisionReason === "481" ||
     reason === "203"
   ) {
     return "declined";
   }
+
+  if (flag === "SOK" || rCode === "1" || reason === "100") return "approved";
   if (errorInformation?.message) return "failed";
   if (!flag && !rCode && !reason) {
     // Fall back to application outcomes when the summary omits overall flags.
-    const decision = apps.find((app) => app.name === "ics_decision");
-    if (decision && String(decision.rFlag || "").toUpperCase().includes("REJECT")) {
-      return "declined";
-    }
     if (auth && (authFlag === "SOK" || String(auth.rCode) === "1")) {
       return "approved";
     }
