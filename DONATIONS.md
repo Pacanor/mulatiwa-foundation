@@ -47,7 +47,7 @@ The live app is still the **old static site** (September build). Do **not** edit
 
 ### 3. Donate UI gating (static vs app)
 
-Landing-page Donate buttons are marked `data-donate-gate` and stay `hidden` until `script.js` gets `{"status":"ok"}` from `/api/health`.
+Landing-page Donate buttons (nav, hero, contact, footer) are public.
 
 | Host | `/api/health` | Donate CTAs |
 |------|---------------|-------------|

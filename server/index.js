@@ -150,37 +150,9 @@ app.disable("x-powered-by");
 app.use(express.json({ limit: "32kb" }));
 
 app.get("/api/health", async (_req, res) => {
-  let donationCount = 0;
-  try {
-    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    donationCount = (await searchTransactions({ from: since, to: new Date() })).length;
-  } catch {
-    donationCount = 0;
-  }
+  // Keep this fast: landing used to hide Donate until /api/health returned, and
+  // Cybersource TSS lookups here were taking multi-second round trips.
   const cybsEnv = resolveCybsEnv();
-  let payerAuthViaUc = null;
-  try {
-    // Look at recent authorizations: UC 3DS is live only when ics_pa_* rides
-    // with ics_auth. Production has been authorizing with ECI 7 and no PA apps.
-    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const recent = await searchTransactions({ from: since, to: new Date() });
-    let authCount = 0;
-    let authWithPa = 0;
-    for (const row of recent) {
-      const apps = (row.applications || []).map((app) => String(app.name || ""));
-      if (!apps.includes("ics_auth")) continue;
-      authCount += 1;
-      if (apps.some((name) => /^ics_pa_/.test(name))) authWithPa += 1;
-    }
-    payerAuthViaUc = {
-      window_days: 7,
-      auth_count: authCount,
-      auth_with_payer_auth: authWithPa,
-      likely_missing_uc_3ds: authCount > 0 && authWithPa === 0,
-    };
-  } catch (error) {
-    payerAuthViaUc = { error: error.message };
-  }
   res.json({
     status: "ok",
     cybs_env: cybsEnv,
@@ -191,8 +163,6 @@ app.get("/api/health", async (_req, res) => {
     mail_ready: Boolean(process.env.RESEND_API_KEY),
     ledger_ready: ledgerReady(),
     ledger_source: "cybersource",
-    donation_count: donationCount,
-    payer_auth_via_uc: payerAuthViaUc,
   });
 });
 

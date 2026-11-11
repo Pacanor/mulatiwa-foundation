@@ -46,42 +46,6 @@ document.querySelectorAll("[data-year]").forEach((item) => {
   item.textContent = new Date().getFullYear();
 });
 
-// Show Donate CTAs only when the Node app is serving /api/health (hidden on static hosting).
-(() => {
-  const gates = document.querySelectorAll("[data-donate-gate]");
-  if (!gates.length) return;
-
-  const revealDonate = () => {
-    document.body.classList.add("donate-live");
-    gates.forEach((el) => {
-      el.hidden = false;
-    });
-    document.querySelectorAll("[data-donate-demote]").forEach((el) => {
-      el.classList.remove("button-gold");
-      el.classList.add("button-light");
-    });
-  };
-
-  const controller = new AbortController();
-  const timer = window.setTimeout(() => controller.abort(), 1600);
-
-  fetch("/api/health", {
-    method: "GET",
-    headers: { Accept: "application/json" },
-    signal: controller.signal,
-    cache: "no-store",
-  })
-    .then(async (response) => {
-      window.clearTimeout(timer);
-      if (!response.ok) return;
-      const payload = await response.json().catch(() => null);
-      if (payload?.status === "ok") revealDonate();
-    })
-    .catch(() => {
-      window.clearTimeout(timer);
-    });
-})();
-
 const sectionIds = ["about", "work", "academy", "leadership", "contact"];
 const navLinks = [...(nav?.querySelectorAll("[data-nav]") || [])];
 const sections = sectionIds
