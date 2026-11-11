@@ -223,7 +223,7 @@ If production UC has Payment processing ON but still never shows `ics_pa_*`, ask
 - OTP / bank challenge appears when the issuer requires it  
 - Transaction apps include `ics_pa_*` with `ics_auth`  
 - ECI is not **7**; DM no longer rejects for “ECI Not presented”  
-- `GET /api/health` → `payer_auth_via_uc.likely_missing_uc_3ds` becomes `false`
+- Recent production auths in Transaction Management include `ics_pa_*` with a real ECI (not 7)
 
 ## Emails + Cybersource ledger
 
